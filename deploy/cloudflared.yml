@@ -1,0 +1,9 @@
+# Cloudflare Tunnel: only /mcp is published. Put a Cloudflare Access policy (your account only)
+# on this hostname BEFORE adding it as a custom connector in Claude.
+tunnel: session-orchestrator
+credentials-file: /etc/cloudflared/session-orchestrator.json
+ingress:
+  - hostname: orchestrator.example.com
+    path: ^/mcp$
+    service: http://127.0.0.1:8787
+  - service: http_status:404

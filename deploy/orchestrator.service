@@ -1,0 +1,15 @@
+[Unit]
+Description=Session Orchestrator MCP
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=orchestrator
+WorkingDirectory=/opt/session-orchestrator
+EnvironmentFile=/opt/session-orchestrator/.env
+ExecStart=/usr/bin/node src/server.ts
+Restart=on-failure
+StateDirectory=session-orchestrator
+
+[Install]
+WantedBy=multi-user.target

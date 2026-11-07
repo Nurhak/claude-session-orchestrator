@@ -1,0 +1,16 @@
+machines:
+  - id: node2
+    local: true            # the orchestrator runs here; commands use local sh, not SSH
+    os: linux
+    projects_root: ~/projects
+  - id: gpu
+    ssh_host: gpu          # Tailscale MagicDNS name
+    user: orchestrator     # dedicated, restricted, key-only SSH user
+    os: linux
+    projects_root: ~/projects
+  - id: macbook
+    ssh_host: macbook
+    user: orchestrator
+    os: macos
+    projects_root: ~/Developer
+    # claude_cmd: /opt/homebrew/bin/claude   # if claude is not on the non-login PATH

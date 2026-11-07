@@ -1,0 +1,7 @@
+# Phase 5. Only `endpoints` is read today (machine_status reports whether each is up).
+endpoints:
+  - machine: gpu
+    url: http://gpu:11434/v1   # OpenAI-compatible base URL, including /v1
+    model: qwen2.5:7b-instruct-q4_K_M
+    ctx: 32768
+    max_vram_gb: 8

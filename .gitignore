@@ -1,0 +1,5 @@
+node_modules/
+.env
+*.db
+config/*.yaml
+!config/*.example.yaml
