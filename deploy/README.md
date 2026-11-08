@@ -6,7 +6,7 @@ These steps need your accounts (Cloudflare, Claude), so they were not run from t
 
 ```sh
 sudo useradd -r -m -d /opt/session-orchestrator orchestrator   # or reuse your user and edit the unit
-sudo -u orchestrator git clone https://github.com/<you>/claude-session-orchestrator /opt/session-orchestrator
+sudo -u orchestrator git clone https://github.com/Nurhak/claude-session-orchestrator /opt/session-orchestrator
 cd /opt/session-orchestrator && sudo -u orchestrator npm ci --omit=dev
 sudo -u orchestrator cp .env.example .env    # set EVENTS_TOKEN and MCP_TOKEN: openssl rand -hex 32
 sudo -u orchestrator cp config/machines.example.yaml config/machines.yaml   # and projects.yaml, llm.yaml

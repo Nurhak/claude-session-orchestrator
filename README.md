@@ -51,7 +51,7 @@ Every result is JSON whose first field is a one-sentence `summary`, written for 
 Requirements: Node ≥ 24, plus `tmux`, `git` and Claude Code on each machine you want to manage. You also need key-only SSH from the hub to the other machines. `jq` is needed on each machine for the hook installer.
 
 ```sh
-git clone https://github.com/<you>/claude-session-orchestrator && cd claude-session-orchestrator
+git clone https://github.com/Nurhak/claude-session-orchestrator && cd claude-session-orchestrator
 npm ci
 cp config/machines.example.yaml config/machines.yaml   # your machines
 cp config/projects.example.yaml config/projects.yaml   # your projects and their spoken aliases

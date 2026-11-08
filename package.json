@@ -30,5 +30,13 @@
     "remote-control",
     "orchestrator",
     "ollama"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nurhak/claude-session-orchestrator.git"
+  },
+  "homepage": "https://github.com/Nurhak/claude-session-orchestrator#readme",
+  "bugs": {
+    "url": "https://github.com/Nurhak/claude-session-orchestrator/issues"
+  }
 }
