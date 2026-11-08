@@ -29,7 +29,7 @@ setPower('AC Power');
 
 // Fake claude: echoes each line as an action; "ask" shows a permission prompt.
 const FAKE = `sh -c 'echo "args: $*"; while read l; do echo "⏺ Update(src/$l.ts)"; ` +
-  `if [ "$l" = ask ]; then printf "Do you want to proceed?\\n❯ 1. Yes\\n"; else seq 9; fi; done' fake`;
+  `if [ "$l" = ask ]; then printf "Do you want to proceed?\\n❯ 1. Yes\\n"; else seq 15; fi; done' fake`;
 
 // Fake OpenAI-compatible endpoint that says which model answered.
 const fakeLlm = createServer(async (req, res) => {
@@ -147,7 +147,7 @@ test('session lifecycle over MCP + hooks', async () => {
   await wait(300);
 
   let read = await call('session_read', { session: 'demo', mode: 'tail' });
-  assert.match(read.text, /args: --remote-control first 'task'/);
+  assert.match(read.text, new RegExp(`args: --remote-control ${name} first 'task'`));
 
   await call('session_send', { session: name, message: 'ask' });
   await wait(500);
@@ -170,9 +170,9 @@ test('session lifecycle over MCP + hooks', async () => {
 
   const ap = await call('session_approve', { session: name, choice: 'yes' });
   assert.ok(!ap.err, ap.summary);
-  assert.equal((await call('events_pending')).pending.length, 0);
   await call('session_send', { session: name, message: 'go' }); // fake gets "1go", scrolls the prompt away
   await wait(400);
+  assert.equal((await call('events_pending')).pending.length, 0);
   assert.match((await call('session_approve', { session: name, choice: 'yes' })).summary, /not waiting for approval/);
 
   assert.equal((await post({ hook_event_name: 'Stop' })).status, 204);

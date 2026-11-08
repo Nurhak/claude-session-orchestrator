@@ -8,7 +8,8 @@ const Machine = z.object({
   ssh_host: z.string().optional(),
   user: z.string().optional(),
   os: z.enum(['linux', 'macos']).default('linux'),
-  projects_root: z.string().default('~/projects'),
+  // A bare `~` in YAML parses as null; treat it as the home folder it was meant to be.
+  projects_root: z.string().nullable().default('~/projects').transform((v) => v ?? '~'),
   local: z.boolean().default(false),
   // Command that starts Claude Code; tests swap it for a fake.
   claude_cmd: z.string().default('claude --remote-control'),

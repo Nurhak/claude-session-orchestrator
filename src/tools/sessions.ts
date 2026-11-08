@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { findMachine, findProject, projectDir, UserError, type Machine } from '../config.ts';
 import { injectContext, logSession } from './memory.ts';
 import type { SessionRow } from '../db.ts';
-import { detectStatus, summarize, tail, type Status } from '../summarize.ts';
+import { detectStatus, menuKeys, summarize, tail, type Status } from '../summarize.ts';
 import * as tmux from '../tmux.ts';
 import { q, qpath, runOk } from '../transport/ssh.ts';
 import { ago, tool, type Ctx } from './common.ts';
@@ -122,7 +122,8 @@ export function register(server: McpServer, ctx: Ctx) {
       // Spec §5: refresh context.md and the CLAUDE.md import first. A brain problem must not block the session.
       let warning: string | undefined;
       await injectContext(ctx, m, p.id).catch((e) => { warning = `Shared context not updated: ${(e as Error).message}`; });
-      const cmd = `${m.claude_cmd}${remote_control ? ' --remote-control' : ''}${prompt ? ` ${q(prompt)}` : ''}`;
+      // --remote-control takes an optional name, so always pass one or the prompt would be eaten as the name.
+      const cmd = `${m.claude_cmd}${remote_control ? ` --remote-control ${q(sname)}` : ''}${prompt ? ` ${q(prompt)}` : ''}`;
       await tmux.newSession(m, sname, dir, cmd);
       ctx.db.upsertSession({ name: sname, machine: m.id, project: p.id, status: prompt ? 'working' : 'waiting_input', remote_control: remote_control ? 1 : 0 });
       return {
@@ -164,11 +165,13 @@ export function register(server: McpServer, ctx: Ctx) {
     { session: z.string(), choice: z.enum(['yes', 'no', 'always']) },
     async ({ session, choice }) => {
       const s = resolve(ctx, session);
-      if (s.status !== 'waiting_approval' && detectStatus(await tmux.capture(s.m, s.name, 30)) !== 'waiting_approval') {
+      const pane = await tmux.capture(s.m, s.name, 30);
+      if (s.status !== 'waiting_approval' && detectStatus(pane) !== 'waiting_approval') {
         throw new UserError(`${s.project} is not waiting for approval; it is ${SPOKEN[s.status]}.`);
       }
-      // Claude Code's prompt: 1 = Yes, 2 = Yes and don't ask again, Esc = No.
-      await tmux.sendKeys(s.m, s.name, { yes: '1', always: '2', no: 'Escape' }[choice]);
+      // Read the menu on screen; if none is visible, fall back to the tool-permission layout.
+      const keys = menuKeys(pane, choice) ?? [{ yes: '1', always: '2', no: 'Escape' }[choice]];
+      await tmux.sendKeys(s.m, s.name, ...keys);
       ctx.db.setStatus(s.name, choice === 'no' ? 'waiting_input' : 'working');
       return { summary: `Answered ${choice} for ${s.project}.` };
     });

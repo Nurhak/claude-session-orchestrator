@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/mcp-claude-session · /rc            
+
+
+❯ Reply with just the word OK. Do not use any tools.                            
+
+  /remote-control is active · Continue here, on your phone, or at 
+  https://claude.ai/code/session_REDACTED
+
+● OK
+
+✻ Sautéed for 3s · done 8:02 PM
+
+
+
+
+● full  $0.16  last $0.16  4s                 Review  Audit  Board  Details [-]
+                                                                              
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)                                  

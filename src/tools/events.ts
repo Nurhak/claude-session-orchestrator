@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Status } from '../summarize.ts';
 import { SESSION_RE } from '../tmux.ts';
 import { ago, tool, type Ctx } from './common.ts';
-import { writeLog } from './sessions.ts';
+import { refresh, writeLog } from './sessions.ts';
 
 /** Hook payload (Claude Code hook stdin JSON) → session status. Spec §13. */
 export function statusFor(hook: { hook_event_name?: string; message?: string }): Status | undefined {
@@ -39,6 +39,7 @@ export function ingest(ctx: Ctx, session: string, machine: string | undefined, b
 export function register(server: McpServer, ctx: Ctx) {
   tool(server, ctx, 'events_pending', 'Sessions waiting for the user\'s answer or approval, oldest first. Call this first in voice mode.', {},
     async () => {
+      await refresh(ctx); // some prompts (e.g. the startup import dialog) fire no hook; only the pane shows them
       const p = ctx.db.pending();
       return {
         summary: p.length

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { q, qpath } from '../src/transport/ssh.ts';
-import { clean, detectStatus, summarize, tail } from '../src/summarize.ts';
+import { clean, detectStatus, menuKeys, summarize, tail } from '../src/summarize.ts';
 import { statusFor } from '../src/tools/events.ts';
 import { parseKv } from '../src/tools/machines.ts';
 import { findProject, loadConfig } from '../src/config.ts';
@@ -40,6 +40,29 @@ test('summarize/detectStatus read a permission prompt', () => {
   assert.ok(!clean(PANE).some((l) => l.includes('\x1b')));
 });
 
+// Captured from Claude Code 2.1.319 on the first start with a brain import.
+const IMPORT_DIALOG = `  Allow external CLAUDE.md file imports?
+  This project's CLAUDE.md or .claude/rules imports files outside the current
+  working directory. Never allow this for third-party repositories.
+  External imports:
+    /home/nurhak/brain/projects/orchestrator/context.md
+  Important: Only use Claude Code with files you trust. Accessing untrusted
+  files may pose security risks https://code.claude.com/docs/en/security
+  ❯ No, disable external imports
+    Yes, allow external imports
+  Enter to confirm · Esc to cancel`;
+
+test('menuKeys picks the right option in numbered and unnumbered menus', () => {
+  assert.equal(detectStatus(IMPORT_DIALOG), 'waiting_approval');
+  assert.deepEqual(menuKeys(IMPORT_DIALOG, 'yes'), ['Down', 'Enter']);
+  assert.deepEqual(menuKeys(IMPORT_DIALOG, 'always'), ['Down', 'Enter']);
+  assert.deepEqual(menuKeys(IMPORT_DIALOG, 'no'), ['Enter']);
+  assert.deepEqual(menuKeys(PANE, 'yes'), ['1']);
+  assert.deepEqual(menuKeys(PANE, 'always'), ['2']);
+  assert.deepEqual(menuKeys(PANE, 'no'), ['3']);
+  assert.equal(menuKeys('plain output', 'yes'), null);
+});
+
 test('tail collapses long diffs', () => {
   const diff = Array.from({ length: 20 }, (_, i) => `  ${i} + line`).join('\n');
   const t = tail(diff, 100);
@@ -69,4 +92,11 @@ test('config validates machines and resolves aliases', () => {
   assert.throws(() => loadConfig(dir), /unknown machine/);
   writeFileSync(join(dir, 'machines.yaml'), 'machines:\n  - {id: gpu}\n');
   assert.throws(() => loadConfig(dir), /ssh_host/);
+});
+
+test('real Claude Code 2.1.319 idle pane: statusline is not an action', async () => {
+  const { readFileSync } = await import('node:fs');
+  const raw = readFileSync(new URL('./fixtures/idle-2.1.319.txt', import.meta.url), 'utf8');
+  assert.equal(summarize(raw).last_action, 'OK');
+  assert.equal(detectStatus(raw), undefined);
 });
