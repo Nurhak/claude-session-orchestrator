@@ -6,16 +6,25 @@ import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
 import type { Ctx } from './tools/common.ts';
 import * as events from './tools/events.ts';
+import * as llm from './tools/llm.ts';
 import * as machines from './tools/machines.ts';
+import * as memory from './tools/memory.ts';
 import * as sessions from './tools/sessions.ts';
 
 export function mcpServer(ctx: Ctx) {
-  const server = new McpServer({ name: 'session-orchestrator', version: '0.1.0' });
-  machines.register(server, ctx);
-  sessions.register(server, ctx);
-  events.register(server, ctx);
+  const server = new McpServer({ name: 'session-orchestrator', version: '1.0.0' });
+  for (const mod of [machines, sessions, events, memory, llm]) mod.register(server, ctx);
   return server;
 }
+
+export async function boot() {
+  const ctx = { cfg: loadConfig(), db: new Db() };
+  await memory.ensureBrain();
+  ctx.db.failOrphanJobs();
+  return ctx;
+}
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 async function readJson(req: IncomingMessage, limit = 1 << 20): Promise<unknown> {
   let size = 0;
@@ -35,12 +44,15 @@ function tokenOk(req: IncomingMessage, token: string | undefined) {
   return got.length === want.length && timingSafeEqual(got, want);
 }
 
-export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN) {
+export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN, mcpToken = process.env.MCP_TOKEN) {
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://x');
     try {
       if (url.pathname === '/mcp') {
         if (req.method !== 'POST') return void res.writeHead(405).end();
+        // Loopback = cloudflared on this host, already behind Cloudflare Access (spec §7).
+        // Anything else (Claude Code sessions over Tailscale) must bring MCP_TOKEN.
+        if (!LOOPBACK.has(req.socket.remoteAddress ?? '') && !tokenOk(req, mcpToken)) return void res.writeHead(401).end();
         // Stateless: a fresh server + transport per request; all state lives in SQLite.
         const server = mcpServer(ctx);
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -64,7 +76,7 @@ export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN) {
 }
 
 if (import.meta.main) {
-  const ctx = { cfg: loadConfig(), db: new Db() };
+  const ctx = await boot();
   if (!process.env.EVENTS_TOKEN) console.warn('EVENTS_TOKEN is not set: /events will reject every hook.');
   const port = Number(process.env.PORT ?? 8787), host = process.env.HOST ?? '127.0.0.1';
   app(ctx).listen(port, host, () => console.log(`session-orchestrator on http://${host}:${port}/mcp`));

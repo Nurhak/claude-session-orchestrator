@@ -14,7 +14,7 @@ export interface RunResult { stdout: string; stderr: string; code: number }
  * Run a shell command on a machine: local sh for `local: true`, otherwise SSH.
  * Never hangs longer than timeoutMs (acceptance: unreachable Mac errors within 5s).
  */
-export function run(m: Machine, cmd: string, timeoutMs = 5000): Promise<RunResult> {
+export function run(m: Machine, cmd: string, timeoutMs = 5000, input?: string): Promise<RunResult> {
   const [bin, args] = m.local
     ? ['sh', ['-c', cmd]]
     : ['ssh', [
@@ -25,8 +25,8 @@ export function run(m: Machine, cmd: string, timeoutMs = 5000): Promise<RunResul
         cmd,
       ]];
   return new Promise((resolve) => {
-    execFile(bin, args as string[], { timeout: timeoutMs, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
-      const e = err as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean }) | null;
+    const child = execFile(bin, args as string[], { timeout: timeoutMs, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+      const e = err as { code?: number | string; killed?: boolean } | null;
       // ssh exits 255 on connection failure; a timeout kills the process.
       if (e && (e.killed || (!m.local && e.code === 255))) {
         resolve({ stdout, stderr: stderr || 'unreachable', code: 255 });
@@ -34,6 +34,8 @@ export function run(m: Machine, cmd: string, timeoutMs = 5000): Promise<RunResul
         resolve({ stdout, stderr, code: e ? (typeof e.code === 'number' ? e.code : 1) : 0 });
       }
     });
+    child.stdin?.on('error', () => {}); // remote closed early; the exit code tells the story
+    child.stdin?.end(input ?? '');
   });
 }
 
@@ -45,8 +47,8 @@ export function unreachable(m: Machine): UserError {
 }
 
 /** Like run(), but throws a speakable error when the machine is down or the command fails. */
-export async function runOk(m: Machine, cmd: string, timeoutMs = 5000): Promise<string> {
-  const r = await run(m, cmd, timeoutMs);
+export async function runOk(m: Machine, cmd: string, timeoutMs = 5000, input?: string): Promise<string> {
+  const r = await run(m, cmd, timeoutMs, input);
   if (r.code === 255) throw unreachable(m);
   if (r.code !== 0) throw new UserError(`Command failed on ${m.id}: ${r.stderr.trim().slice(0, 200) || `exit ${r.code}`}`);
   return r.stdout;

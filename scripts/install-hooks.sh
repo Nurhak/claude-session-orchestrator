@@ -18,5 +18,6 @@ sh_ 'chmod 700 ~/.claude/hooks/cc-orchestrator-notify.sh; chmod 600 ~/.config/cc
 f=~/.claude/settings.json; [ -f "$f" ] || echo "{}" > "$f"
 h="{\"type\":\"command\",\"command\":\"$HOME/.claude/hooks/cc-orchestrator-notify.sh\"}"
 jq --argjson h "$h" ".hooks.Notification = ((.hooks.Notification // []) | map(select(.hooks[0].command != \$h.command)) + [{hooks:[\$h]}])
-  | .hooks.Stop = ((.hooks.Stop // []) | map(select(.hooks[0].command != \$h.command)) + [{hooks:[\$h]}])" "$f" > "$f.tmp" && mv "$f.tmp" "$f"'
+  | .hooks.Stop = ((.hooks.Stop // []) | map(select(.hooks[0].command != \$h.command)) + [{hooks:[\$h]}])
+  | .hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(select(.hooks[0].command != \$h.command)) + [{hooks:[\$h]}])" "$f" > "$f.tmp" && mv "$f.tmp" "$f"'
 echo "hooks installed on $machine"

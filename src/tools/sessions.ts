@@ -1,7 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { findMachine, findProject, projectDir, UserError } from '../config.ts';
+import { findMachine, findProject, projectDir, UserError, type Machine } from '../config.ts';
+import { injectContext, logSession } from './memory.ts';
 import type { SessionRow } from '../db.ts';
 import { detectStatus, summarize, tail, type Status } from '../summarize.ts';
 import * as tmux from '../tmux.ts';
@@ -26,6 +27,8 @@ export async function refresh(ctx: Ctx, machine?: string): Promise<LiveSession[]
     const rows = new Map(ctx.db.sessions().filter((r) => r.machine === m.id).map((r) => [r.name, r]));
     if (live) {
       for (const s of live) {
+        const owner = ctx.db.session(s.name)?.machine;
+        if (owner && owner !== m.id) continue; // same name already tracked on another machine
         if (!rows.has(s.name)) {
           // Started outside the orchestrator: project is the middle of cc-<project>-<id>.
           ctx.db.upsertSession({ name: s.name, machine: m.id, project: s.name.slice(3).replace(/-[^-]+$/, ''), status: 'idle', remote_control: 0 });
@@ -60,6 +63,22 @@ export function resolve(ctx: Ctx, name: string): SessionRow & { m: ReturnType<ty
   }
   if (!row || row.status === 'stopped') throw new UserError(`No running session called "${name}".`);
   return { ...row, m: findMachine(ctx.cfg, row.machine) };
+}
+
+/** Best effort "what happened in this session" entry in the brain's projects/<p>/log.md. */
+export async function writeLog(ctx: Ctx, s: SessionRow, m: Machine, note?: string) {
+  try {
+    let text = note ?? '';
+    const raw = await tmux.capture(m, s.name, 400).catch(() => null);
+    if (raw) {
+      const sum = summarize(raw);
+      text = [note, sum.last_action && `Last action: ${sum.last_action}`, `${sum.changed_files_count} files changed`,
+        sum.last_error && `Last error: ${sum.last_error}`].filter(Boolean).join('. ') + '.';
+    }
+    await logSession(ctx, s.project, s.name, `Machine: ${m.id}. ${text || 'Session ended.'}`);
+  } catch (e) {
+    console.error(`session log for ${s.name} failed:`, (e as Error).message);
+  }
 }
 
 export function line(s: LiveSession) {
@@ -100,11 +119,14 @@ export function register(server: McpServer, ctx: Ctx) {
       if ((await tmux.snapshot(m)).some((s) => s.name === sname)) throw new UserError(`${sname} already exists on ${m.id}.`);
       const dir = projectDir(m, p);
       await runOk(m, `test -d ${qpath(dir)}`).catch(() => { throw new UserError(`Project folder ${dir} does not exist on ${m.id}.`); });
+      // Spec §5: refresh context.md and the CLAUDE.md import first. A brain problem must not block the session.
+      let warning: string | undefined;
+      await injectContext(ctx, m, p.id).catch((e) => { warning = `Shared context not updated: ${(e as Error).message}`; });
       const cmd = `${m.claude_cmd}${remote_control ? ' --remote-control' : ''}${prompt ? ` ${q(prompt)}` : ''}`;
       await tmux.newSession(m, sname, dir, cmd);
       ctx.db.upsertSession({ name: sname, machine: m.id, project: p.id, status: prompt ? 'working' : 'waiting_input', remote_control: remote_control ? 1 : 0 });
       return {
-        summary: `Started ${p.id} on ${m.id} as ${sname}${prompt ? ', first prompt sent' : ''}${remote_control ? '; it will show in the Claude app' : ''}.`,
+        summary: `Started ${p.id} on ${m.id} as ${sname}${prompt ? ', first prompt sent' : ''}${remote_control ? '; it will show in the Claude app' : ''}.${warning ? ` ${warning}` : ''}`,
         session: sname,
       };
     });
@@ -164,13 +186,12 @@ export function register(server: McpServer, ctx: Ctx) {
     { session: z.string(), mode: z.enum(['graceful', 'kill']).default('graceful'), confirm: z.boolean().optional() },
     async ({ session, mode, confirm }) => {
       const s = resolve(ctx, session);
-      if (mode === 'kill') {
-        if (confirm !== true) throw new UserError(`Killing ${s.name} needs confirm=true. Ask the user first.`);
-        await tmux.kill(s.m, s.name);
-      } else {
-        await tmux.sendText(s.m, s.name, '/exit');
-      }
+      if (mode === 'kill' && confirm !== true) throw new UserError(`Killing ${s.name} needs confirm=true. Ask the user first.`);
+      await writeLog(ctx, s, s.m); // while the pane still exists
+      // Mark stopped first so the SessionEnd hook that /exit triggers does not log a second time.
       ctx.db.setStatus(s.name, 'stopped');
+      if (mode === 'kill') await tmux.kill(s.m, s.name);
+      else await tmux.sendText(s.m, s.name, '/exit');
       return { summary: `${mode === 'kill' ? 'Killed' : 'Stopped'} ${s.project} on ${s.machine}.` };
     });
 

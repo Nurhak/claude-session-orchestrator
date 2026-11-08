@@ -6,8 +6,7 @@ Wants=network-online.target
 [Service]
 User=orchestrator
 WorkingDirectory=/opt/session-orchestrator
-EnvironmentFile=/opt/session-orchestrator/.env
-ExecStart=/usr/bin/node src/server.ts
+ExecStart=/usr/bin/node --env-file=.env src/server.ts
 Restart=on-failure
 StateDirectory=session-orchestrator
 

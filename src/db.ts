@@ -25,6 +25,9 @@ export class Db {
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY, session TEXT NOT NULL, hook TEXT NOT NULL,
         status TEXT NOT NULL, message TEXT, ts INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY, agent TEXT NOT NULL, task TEXT NOT NULL, status TEXT NOT NULL,
+        result TEXT, started INTEGER NOT NULL, finished INTEGER);
       CREATE TABLE IF NOT EXISTS audit (
         id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, tool TEXT NOT NULL,
         args TEXT NOT NULL, ok INTEGER NOT NULL, error TEXT);
@@ -58,6 +61,26 @@ export class Db {
   addEvent(session: string, hook: string, status: Status, message: string | null) {
     this.db.prepare(`INSERT INTO events (session, hook, status, message, ts) VALUES (?, ?, ?, ?, ?)`)
       .run(session, hook, status, message, Date.now());
+  }
+
+  addJob(id: string, agent: string, task: string) {
+    this.db.prepare(`INSERT INTO jobs (id, agent, task, status, started) VALUES (?, ?, ?, 'running', ?)`)
+      .run(id, agent, task, Date.now());
+  }
+
+  finishJob(id: string, status: 'done' | 'failed', result: string) {
+    this.db.prepare(`UPDATE jobs SET status = ?, result = ?, finished = ? WHERE id = ?`)
+      .run(status, result, Date.now(), id);
+  }
+
+  job(id: string) {
+    return this.db.prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as
+      { id: string; agent: string; task: string; status: string; result: string | null; started: number; finished: number | null } | undefined;
+  }
+
+  /** Jobs still 'running' after a restart lost their worker. */
+  failOrphanJobs() {
+    this.db.prepare(`UPDATE jobs SET status = 'failed', result = 'orchestrator restarted' WHERE status = 'running'`).run();
   }
 
   audit(tool: string, args: unknown, error?: string) {

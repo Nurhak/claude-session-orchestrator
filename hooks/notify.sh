@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code Notification/Stop hook: forwards the hook JSON to the orchestrator's /events.
+# Claude Code Notification/Stop/SessionEnd hook: forwards the hook JSON to the orchestrator's /events.
 # Config (written by scripts/install-hooks.sh): ORCH_URL, EVENTS_TOKEN, ORCH_MACHINE.
 . "$HOME/.config/cc-orchestrator.env" 2>/dev/null
 [ -n "$TMUX" ] || exit 0
