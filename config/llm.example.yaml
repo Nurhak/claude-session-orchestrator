@@ -1,4 +1,4 @@
-# Local models (spec §6). Every endpoint is OpenAI-compatible (Ollama, LM Studio, llama.cpp, vLLM).
+# Local models. Every endpoint is OpenAI-compatible (Ollama, LM Studio, llama.cpp, vLLM).
 endpoints:
   - id: gpu-small
     machine: gpu
@@ -26,6 +26,6 @@ agents:
     machine: gpu
     url: http://gpu:8000/run
   - id: aider-draft
-    machine: node2
+    machine: hub
     cmd: cd ~/projects/scratch && aider --yes --message "$(cat)"
     timeout_s: 900

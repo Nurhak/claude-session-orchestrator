@@ -1,13 +1,13 @@
 {
-  "name": "session-orchestrator",
-  "version": "1.0.0",
-  "description": "",
+  "name": "claude-session-orchestrator",
+  "version": "0.1.0",
+  "description": "MCP server to manage all your Claude Code sessions across machines from one place (Claude app, voice, or another session): tmux + SSH, permission approvals, shared memory, local LLM routing.",
   "scripts": {
     "test": "node --test 'test/*.test.ts'",
     "start": "node --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc"
   },
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -15,10 +15,20 @@
     "zod": "^4.6.7"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=24"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
-  }
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "claude",
+    "claude-code",
+    "tmux",
+    "remote-control",
+    "orchestrator",
+    "ollama"
+  ]
 }

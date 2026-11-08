@@ -71,7 +71,7 @@ export function register(server: McpServer, ctx: Ctx) {
     });
 
   tool(server, ctx, 'machine_status', 'CPU, RAM, disk, GPU/VRAM, network link (ethernet/wifi) and local LLM endpoints of one machine.',
-    { machine: z.string().describe('Machine id, e.g. macbook, node2, gpu') },
+    { machine: z.string().describe('Machine id, e.g. macbook, hub, gpu') },
     async ({ machine }) => {
       const m = findMachine(ctx.cfg, machine);
       const s = parseKv(await runOk(m, m.os === 'macos' ? MACOS : LINUX, 8000));

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Usage: scripts/install-hooks.sh <ssh-target> <machine-id> <orch-url>
-# Example: scripts/install-hooks.sh me@gpu gpu http://node2:8787
+# Example: scripts/install-hooks.sh me@gpu gpu http://hub:8787
 # Needs EVENTS_TOKEN in the environment (or in .env) and jq on the target.
 set -eu
 [ $# -eq 3 ] || { echo "usage: $0 <ssh-target> <machine-id> <orch-url>" >&2; exit 2; }

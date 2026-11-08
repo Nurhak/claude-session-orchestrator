@@ -1,81 +1,127 @@
-# Session Orchestrator MCP
+# claude-session-orchestrator
 
-One MCP server that manages every Claude Code session on all your machines (macbook, node2, gpu) from a single Claude voice session. It also holds a shared brain (notes, shared knowledge, skills) and hands small jobs to local models. It never calls Claude itself; it forwards commands over SSH + tmux. Spec: https://claude.ai/artifact/54hCBwJuwFQeA6dZurUMca
+An MCP server that lets you manage **all your Claude Code sessions, on all your machines, from one place**. That place can be the Claude mobile app (including voice mode), claude.ai, or another Claude Code session.
 
-## Status
+Ask "how are my projects doing?" while you're away from the keyboard. Then start a session on your GPU box, approve a pending permission prompt, or read what a session did. You never open a terminal.
 
-| Phase (spec §9) | State |
-| --- | --- |
-| 1. Core: config, `machine_*`, `session_*`, `overview` | done, tested |
-| 2. Events: hooks, `/events`, `events_pending` | done, tested |
-| 3. Publishing: Tunnel + Access, connector, voice test | files and steps in [`deploy/`](deploy/README.md); needs your Cloudflare and Claude accounts |
-| 4. Shared memory: brain repo, `memory_*`, `project_context`, `context.md`, session logs, skill symlinks | done, tested |
-| 5. Local LLM: `llm_list`, `llm_run`, routing, `agent_run`, `agent_status` | done, tested against a fake OpenAI endpoint |
-| 6. Later: push notifications, embedding search | not in scope (spec: "İleride") |
+- **Sessions run in tmux** on your machines, reached over SSH (Tailscale works well). Each session starts with `--remote-control`, so it also shows up in the Claude app.
+- **Hooks report state.** Claude Code's `Notification`, `Stop` and `SessionEnd` hooks tell the server which sessions are waiting for input or approval.
+- **Shared memory.** A git repo of markdown notes ("the brain"), with shared knowledge and skills. It is injected into each new session through `CLAUDE.md`.
+- **Local LLMs.** Small jobs can go to OpenAI-compatible endpoints (Ollama, LM Studio, llama.cpp, vLLM), with routing that never uses a laptop running on battery.
+- **No model calls of its own.** The thinking stays in your Claude subscription; this server only forwards commands.
+
+> Status: early (0.1). Tested end to end against Claude Code 2.1.319 on Linux. The macOS and multi-machine paths are covered by tests but have had little real-world use. Issues and PRs are welcome.
+
+## How it works
+
+```
+ Claude app / voice ──HTTPS──▶ Cloudflare Tunnel + Access ──▶ orchestrator (/mcp) on an always-on "hub"
+                                                                 │  SQLite: sessions, events, audit log
+                                                                 │  ~/brain: shared memory (git)
+                                                     SSH / local sh
+                                          ┌──────────────────────┼──────────────────────┐
+                                        hub                     gpu                   laptop
+                                 tmux: cc-<project>-<id>   tmux: cc-…              tmux: cc-…
+                                 claude --remote-control …
+                                          └───── hooks POST /events (Bearer EVENTS_TOKEN) ─────┘
+```
 
 ## Tools (22)
 
 | Tool | What it does |
 | --- | --- |
-| `machine_list()` | Reachable or not, cc-session count, MacBook power (ac/battery) |
-| `machine_status(machine)` | CPU, load, RAM, disk, GPU/VRAM, ethernet/wifi, LLM endpoints up/down |
-| `session_list(machine?)` | Sessions with status `working`, `waiting_input`, `waiting_approval`, `idle` or `stopped` |
-| `session_start(project, machine?, prompt?, remote_control=true, name?)` | Refreshes `context.md`, then starts `claude --remote-control [prompt]` in tmux |
-| `session_read(session, mode, lines)` | `summary`: last_action, waiting_for, last_error, changed_files_count. `tail`: cleaned text |
-| `session_send` / `session_approve(yes, no, always)` / `session_interrupt` | Type a message, answer a permission prompt, press Esc |
-| `session_stop(session, graceful/kill, confirm?)` | Writes the session log, then `/exit` or kill (kill needs `confirm=true`) |
-| `events_pending()` / `overview()` | What is waiting on you / one line per session |
-| `memory_search(query, scope?)` | ripgrep search (falls back to grep) |
-| `memory_read` / `memory_write` / `memory_append` / `memory_delete(confirm)` | Brain files; every write is a git commit |
-| `memory_link(project, shared_path)` | Adds the path to `projects/<p>/links.md` |
-| `project_context(project)` | Notes + linked shared files + related skills, in one package |
-| `llm_list()` / `llm_run(task, endpoint="auto", model?, max_tokens?, system?)` | Local OpenAI-compatible models |
-| `agent_run(agent, task)` / `agent_status(job_id)` | Local agents over HTTP or CLI, run as background jobs |
+| `overview()` | One line per session, plus what is waiting on you. "How are my projects doing?" |
+| `events_pending()` | Sessions waiting for your input or approval, oldest first |
+| `machine_list()` / `machine_status(machine)` | Reachability, session count, laptop power (AC or battery); CPU, RAM, disk, GPU/VRAM, link type, LLM endpoints |
+| `session_list(machine?)` | Status: `working`, `waiting_input`, `waiting_approval`, `idle` or `stopped` |
+| `session_start(project, machine?, prompt?, remote_control=true, name?)` | Refreshes the shared context, then starts Claude Code in tmux |
+| `session_read(session, mode=summary\|tail, lines)` | Last action, what it is waiting for, last error, files changed; or a cleaned tail of the output |
+| `session_send(session, message)` | Types a message and presses Enter |
+| `session_approve(session, yes\|no\|always)` | Answers the menu on screen (tool permissions, trust dialogs) |
+| `session_interrupt(session)` / `session_stop(session, graceful\|kill, confirm?)` | Esc / `/exit`, or kill (kill needs `confirm=true`) |
+| `memory_search` / `memory_read` / `memory_write` / `memory_append` / `memory_delete` | The brain; every write is a git commit, and delete needs `confirm=true` |
+| `memory_link(project, shared_path)` / `project_context(project)` | Link shared knowledge to a project / get everything a session on that project should know |
+| `llm_list()` / `llm_run(task, endpoint=auto, …)` | Local models with auto routing |
+| `agent_run(agent, task)` / `agent_status(job_id)` | Local agents (HTTP or CLI) as background jobs |
 
-Every result is JSON whose first field is a one-sentence `summary` for voice (spec §8). Wherever a tool takes `session`, you can pass the full name (`cc-halfsaid-a1b2`) or a project id or alias, as long as that project has one running session. Every call goes into the SQLite `audit` table.
+Every result is JSON whose first field is a one-sentence `summary`, written for voice. Long diffs and logs are never dumped. Sessions can be named by project alias ("my app"), and every call goes into an audit log.
 
 ## Quick start
 
+Requirements: Node ≥ 24, plus `tmux`, `git` and Claude Code on each machine you want to manage. You also need key-only SSH from the hub to the other machines. `jq` is needed on each machine for the hook installer.
+
 ```sh
+git clone https://github.com/<you>/claude-session-orchestrator && cd claude-session-orchestrator
 npm ci
-cp config/machines.example.yaml config/machines.yaml    # also projects.yaml, llm.yaml
-cp .env.example .env                                    # EVENTS_TOKEN, MCP_TOKEN
-npm start                                               # http://127.0.0.1:8787/mcp
-npm test && npm run typecheck
+cp config/machines.example.yaml config/machines.yaml   # your machines
+cp config/projects.example.yaml config/projects.yaml   # your projects and their spoken aliases
+cp config/llm.example.yaml config/llm.yaml             # optional: local models and agents
+cp .env.example .env                                   # set EVENTS_TOKEN and MCP_TOKEN: openssl rand -hex 32
+npm start                                              # http://127.0.0.1:8787/mcp
 ```
 
-Needs Node ≥ 22.18 (runs the TypeScript directly) and `tmux` on every machine. Production setup: [deploy/README.md](deploy/README.md).
+Install the hooks on each machine. This adds `Notification`, `Stop` and `SessionEnd` hooks to `~/.claude/settings.json` and keeps your existing hooks:
 
-## Shared memory layout
+```sh
+scripts/install-hooks.sh local hub http://127.0.0.1:8787
+scripts/install-hooks.sh me@gpu gpu http://hub:8787
+```
+
+Use it from Claude Code right away:
+
+```sh
+claude mcp add -s user --transport http orchestrator http://127.0.0.1:8787/mcp
+```
+
+To use it from the Claude app or voice mode, publish `/mcp` through a Cloudflare Tunnel with Access in front, then add it as a custom connector. [deploy/README.md](deploy/README.md) covers that, plus systemd, skills, and Claude Code sessions as clients.
+
+## Configuration
+
+- `machines.yaml`: `id`, `ssh_host`, `user`, `os` (`linux` or `macos`), `projects_root`, `local: true` for the hub itself, and an optional `claude_cmd`.
+- `projects.yaml`: `id`, spoken `aliases`, default `machine`, `path`, and `shared` brain paths to always include.
+- `llm.yaml`: `endpoints` (`id`, `machine`, `url` including `/v1`, `model`, `ctx`, `requires_ac`), `routing.order`, and `agents` (`url` or `cmd`).
+- `.env`: `EVENTS_TOKEN`, `MCP_TOKEN`, `PORT`, `HOST`, `DB_PATH`, `CONFIG_DIR`, `BRAIN_DIR`, `REMOTE_BRAIN_DIR`, `BRAIN_PUSH`, `LLM_TIMEOUT_S`.
+
+### Shared memory layout
 
 ```
-~/brain/                    git repo on node2 (BRAIN_DIR), created on first start
-  index.md                  projects, tags and relations (written by you)
-  shared/<topic>/           cross-project knowledge: deployment, branding, mobile, infra
+~/brain/                    git repo on the hub (BRAIN_DIR), created on first start
+  index.md                  your map of projects, tags and relations
+  shared/<topic>/           cross-project knowledge: deployment, branding, infra…
   projects/<p>/*.md         project notes and decisions
-  projects/<p>/links.md     shared paths linked by memory_link
+  projects/<p>/links.md     shared paths linked with memory_link
   projects/<p>/log.md       one entry per ended session
-  projects/<p>/context.md   generated at session_start, gitignored
-  skills/<name>/            shared Claude Code skills, symlinked by scripts/link-skills.sh
+  projects/<p>/context.md   generated at session_start (gitignored)
+  skills/<name>/            shared Claude Code skills; scripts/link-skills.sh symlinks them into ~/.claude/skills
 ```
 
-## Assumptions
+At `session_start`, `context.md` is rebuilt from the project's notes, its linked shared files and related skills. It is copied to the target machine, and the project's `CLAUDE.md` gets `@…/context.md` once. On a project's first start, Claude Code asks "Allow external CLAUDE.md file imports?", and you can answer with `session_approve`.
 
-- **SQLite is Node's built-in `node:sqlite`**, not `better-sqlite3`: same SQL, no native build.
-- **Stateless MCP over HTTP.** Each request gets a fresh server, and all state lives in SQLite.
-- **`/mcp` auth:** loopback callers are trusted, because that is cloudflared behind Cloudflare Access. Anyone else must send `Authorization: Bearer $MCP_TOKEN`. `/events` always needs `EVENTS_TOKEN`.
-- **Starting sessions:** `claude --remote-control "<prompt>"`, with the first prompt passed as an argument. You can change the binary per machine with `claude_cmd`.
-- **Approve keys:** `1` = yes, `2` = always, `Esc` = no. This matches the current Claude Code permission prompt.
-- **Status:** the `Notification`, `Stop` and `SessionEnd` hooks set it (spec §13). The pane regex overrides only when it clearly sees a prompt in the last 8 lines, or `esc to interrupt`.
-- **Session log:** "when the session ends" means `session_stop`, or the `SessionEnd` hook. `Stop` fires after every turn, so it would be too noisy. The entry is built from the pane (last action, files changed, last error), not written by an LLM.
-- **context.md delivery:** it is generated on node2 and copied over SSH to `~/brain/projects/<p>/context.md` on the target machine (`REMOTE_BRAIN_DIR`). That works whichever sync method you pick, so it is gitignored. `CLAUDE.md` gets `@<that path>` once.
-- **Links:** `memory_link` writes to `projects/<p>/links.md`, and `shared:` in projects.yaml also counts. `index.md` is left to you.
-- **"Related skills":** skills whose `skills/<name>` path is linked to the project. All other skill names are listed too.
-- **LLM routing:** the endpoints in `routing.order` are tried in order. An endpoint is skipped when it is down, when the task needs more context than it has (about 3.5 characters per token), or when it is `requires_ac` and its machine is on battery or asleep. Idle endpoints go before busy ones, where busy means a request is in flight from this server. Nothing ever wakes the Mac.
-- **Agents (open question):** `url` agents get `POST {"task","job_id"}` and the response body is the result. `cmd` agents get the task on stdin and stdout is the result. Jobs still running when the server restarts are marked failed.
-- **Open questions** (spec §10) stay in config: Mac RAM goes into the `mac-large` model choice, the agent type is `url`/`cmd`, and brain sync is `BRAIN_PUSH=1` for git push after each commit (or Syncthing outside this app).
+## Security model
 
-## Risks
+- `/mcp` trusts loopback callers only, meaning cloudflared on the same host behind Cloudflare Access. Everyone else needs `Authorization: Bearer $MCP_TOKEN`.
+- `/events` always needs `EVENTS_TOKEN`.
+- There is no general "run a shell command" tool; only the tools above. Every argument is shell-quoted, and session names are validated.
+- Destructive actions (`session_stop kill`, `memory_delete`) need `confirm=true`. Brain paths can't escape the repo or touch `.git`.
+- Use a dedicated, key-only SSH user. Secrets live in `.env`, which is gitignored.
 
-- The TUI parsing in `src/summarize.ts` is regex-based. Re-check it whenever the Claude Code UI wording changes.
-- Phase 3 (Cloudflare Access with Claude's connector OAuth) and the voice flow have not been tested end to end.
+## Development
+
+```sh
+npm test            # unit tests + end-to-end: real HTTP server, private tmux server, fake claude, fake OpenAI endpoint
+npm run typecheck
+```
+
+The TypeScript runs directly on Node (type stripping); there is no build step. `src/summarize.ts` reads Claude Code's terminal UI with regexes. When Claude Code changes its wording, add a captured pane to `test/fixtures/` and adjust it.
+
+## Design notes and limits
+
+- **Stateless MCP over HTTP.** Each request gets a fresh server, and all state lives in SQLite (`node:sqlite`).
+- **Status** comes from hooks first. The pane is a fallback for prompts that fire no hook, and it only overrides on clear signals.
+- **Approving prompts:** numbered menus get the digit, and unnumbered dialogs get arrow keys plus Enter, based on the menu read off the screen.
+- **Laptop power:** nothing ever wakes a sleeping laptop. A Mac on battery counts as unavailable for `requires_ac` endpoints.
+- **Planned:** push notifications for pending approvals, and embedding search over the brain.
+
+## License
+
+[MIT](LICENSE)

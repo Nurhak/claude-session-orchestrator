@@ -1,5 +1,5 @@
 machines:
-  - id: node2
+  - id: hub
     local: true            # the orchestrator runs here; commands use local sh, not SSH
     os: linux
     projects_root: ~/projects

@@ -45,7 +45,7 @@ const IMPORT_DIALOG = `  Allow external CLAUDE.md file imports?
   This project's CLAUDE.md or .claude/rules imports files outside the current
   working directory. Never allow this for third-party repositories.
   External imports:
-    /home/nurhak/brain/projects/orchestrator/context.md
+    /home/user/brain/projects/orchestrator/context.md
   Important: Only use Claude Code with files you trust. Accessing untrusted
   files may pose security risks https://code.claude.com/docs/en/security
   ❯ No, disable external imports
@@ -70,7 +70,7 @@ test('tail collapses long diffs', () => {
   assert.match(t, /diff truncated/);
 });
 
-test('hook payload → status (spec §13)', () => {
+test('hook payload → status', () => {
   assert.equal(statusFor({ hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' }), 'waiting_approval');
   assert.equal(statusFor({ hook_event_name: 'Notification', message: 'Claude is waiting for your input' }), 'waiting_input');
   assert.equal(statusFor({ hook_event_name: 'Stop' }), 'idle');
@@ -85,9 +85,9 @@ test('parseKv reads machine_status output', () => {
 test('config validates machines and resolves aliases', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cfg-'));
   writeFileSync(join(dir, 'machines.yaml'), 'machines:\n  - {id: node2, local: true}\n');
-  writeFileSync(join(dir, 'projects.yaml'), 'projects:\n  - {id: halfsaid, aliases: [Half Said], machine: node2}\n');
+  writeFileSync(join(dir, 'projects.yaml'), 'projects:\n  - {id: myapp, aliases: [My App], machine: node2}\n');
   const cfg = loadConfig(dir);
-  assert.equal(findProject(cfg, 'half said').id, 'halfsaid');
+  assert.equal(findProject(cfg, 'my app').id, 'myapp');
   writeFileSync(join(dir, 'projects.yaml'), 'projects:\n  - {id: x, machine: nope}\n');
   assert.throws(() => loadConfig(dir), /unknown machine/);
   writeFileSync(join(dir, 'machines.yaml'), 'machines:\n  - {id: gpu}\n');

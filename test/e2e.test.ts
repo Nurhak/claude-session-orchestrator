@@ -89,7 +89,7 @@ test('lists all tools', async () => {
     'session_approve', 'session_interrupt', 'session_list', 'session_read', 'session_send', 'session_start', 'session_stop']);
 });
 
-test('unreachable Mac fails fast with a speakable error (acceptance 4)', async () => {
+test('unreachable Mac fails fast with a speakable error', async () => {
   const t = Date.now();
   const r = await call('session_start', { project: 'demo', machine: 'macbook' });
   assert.ok(Date.now() - t < 6000);
@@ -100,7 +100,7 @@ test('unreachable Mac fails fast with a speakable error (acceptance 4)', async (
   assert.equal(list.machines.find((m: { id: string }) => m.id === 'mac').power.source, 'ac');
 });
 
-test('memory tools, and shared knowledge reaches a new session (acceptance 5)', async () => {
+test('memory tools, and shared knowledge reaches a new session', async () => {
   assert.ok((await call('memory_read', { path: '../etc/passwd' })).err);
   assert.ok((await call('memory_write', { path: '.git/config', content: 'x' })).err);
 
@@ -155,7 +155,7 @@ test('session lifecycle over MCP + hooks', async () => {
   assert.equal(read.changed_files_count, 1);
   assert.match(read.waiting_for, /Do you want to proceed/);
 
-  // Hook arrives (acceptance 3).
+  // Hook arrives.
   const post = (body: unknown, token = 'secret') => fetch(`${base}/events?session=${name}`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
   });
@@ -194,7 +194,7 @@ test('session lifecycle over MCP + hooks', async () => {
   assert.ok(audit.n >= 10);
 });
 
-test('llm_run auto routing: GPU down → Mac on AC, never Mac on battery (acceptance 6)', async () => {
+test('llm_run auto routing: GPU down → Mac on AC, never Mac on battery', async () => {
   const list = await call('llm_list');
   assert.match(list.summary, /1 of 2 endpoints up: mac-large/);
 

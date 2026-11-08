@@ -50,7 +50,7 @@ export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN, mcpToken =
     try {
       if (url.pathname === '/mcp') {
         if (req.method !== 'POST') return void res.writeHead(405).end();
-        // Loopback = cloudflared on this host, already behind Cloudflare Access (spec §7).
+        // Loopback = cloudflared on this host, already behind Cloudflare Access.
         // Anything else (Claude Code sessions over Tailscale) must bring MCP_TOKEN.
         if (!LOOPBACK.has(req.socket.remoteAddress ?? '') && !tokenOk(req, mcpToken)) return void res.writeHead(401).end();
         // Stateless: a fresh server + transport per request; all state lives in SQLite.

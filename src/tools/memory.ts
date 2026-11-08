@@ -1,4 +1,4 @@
-// Shared memory (spec §5): a git repo of markdown on node2 ("brain").
+// Shared memory: a git repo of markdown on hub ("brain").
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
@@ -95,7 +95,7 @@ export function projectContext(ctx: Ctx, pid: string, dir = brainDir()) {
 }
 
 /**
- * Before a session starts (spec §5): regenerate context.md, make sure the target machine has it,
+ * Before a session starts: regenerate context.md, make sure the target machine has it,
  * and make sure the project's CLAUDE.md imports it.
  */
 export async function injectContext(ctx: Ctx, m: Machine, pid: string, dir = brainDir()) {
@@ -151,7 +151,7 @@ async function search(dir: string, query: string, scope: string) {
 export function register(server: McpServer, ctx: Ctx) {
   const dir = brainDir();
 
-  tool(server, ctx, 'memory_search', 'Search the shared brain (notes, shared knowledge, skills). scope narrows it, e.g. "shared/deployment" or "projects/halfsaid".',
+  tool(server, ctx, 'memory_search', 'Search the shared brain (notes, shared knowledge, skills). scope narrows it, e.g. "shared/deployment" or "projects/myapp".',
     { query: z.string().min(1), scope: z.string().default('.') },
     async ({ query, scope }) => {
       const hits = await search(dir, query, scope);

@@ -12,7 +12,7 @@ export interface RunResult { stdout: string; stderr: string; code: number }
 
 /**
  * Run a shell command on a machine: local sh for `local: true`, otherwise SSH.
- * Never hangs longer than timeoutMs (acceptance: unreachable Mac errors within 5s).
+ * Never hangs longer than timeoutMs.
  */
 export function run(m: Machine, cmd: string, timeoutMs = 5000, input?: string): Promise<RunResult> {
   const [bin, args] = m.local
@@ -41,7 +41,7 @@ export function run(m: Machine, cmd: string, timeoutMs = 5000, input?: string): 
 
 export function unreachable(m: Machine): UserError {
   const hint = m.os === 'macos'
-    ? ' It is probably asleep or on battery. Start the work on node2 or gpu instead.'
+    ? ' It is probably asleep or on battery. Start the work on another machine instead.'
     : '';
   return new UserError(`${m.id} is unreachable.${hint}`);
 }

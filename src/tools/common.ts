@@ -7,8 +7,8 @@ import type { Db } from '../db.ts';
 export interface Ctx { cfg: Config; db: Db }
 
 /**
- * Register a tool that returns `{ summary, ...detail }` (spec §8: one speakable sentence first),
- * with every call written to the audit log (spec §7).
+ * Register a tool that returns `{ summary, ...detail }` (one speakable sentence first),
+ * with every call written to the audit log.
  */
 export function tool<S extends ZodRawShape>(
   server: McpServer, ctx: Ctx, name: string, description: string, shape: S,

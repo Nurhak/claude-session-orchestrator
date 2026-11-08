@@ -1,5 +1,5 @@
 #!/bin/sh
-# Symlink every ~/brain/skills/<name> into ~/.claude/skills/<name> on a machine (spec §5).
+# Symlink every ~/brain/skills/<name> into ~/.claude/skills/<name> on a machine.
 # Usage: scripts/link-skills.sh <ssh-target|local>. Re-run after adding a skill; existing links are refreshed.
 set -eu
 [ $# -eq 1 ] || { echo "usage: $0 <ssh-target|local>" >&2; exit 2; }

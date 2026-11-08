@@ -1,9 +1,9 @@
 projects:
-  - id: halfsaid
-    aliases: [half said]
+  - id: myapp
+    aliases: [my app]
     machine: gpu
-    path: halfsaid         # relative to the machine's projects_root, or absolute/~
+    path: myapp         # relative to the machine's projects_root, or absolute/~
     shared: [shared/deployment/expo]
-  - id: cohero
-    aliases: [co hero]
+  - id: website
+    aliases: [web site]
     machine: macbook

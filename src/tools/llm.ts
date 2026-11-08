@@ -1,4 +1,4 @@
-// Local LLM / agent layer (spec §6): OpenAI-compatible endpoints on the machines, plus local agents.
+// Local LLM / agent layer: OpenAI-compatible endpoints on the machines, plus local agents.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -22,7 +22,7 @@ export async function up(e: Endpoint) {
 // shortcut: ~3.5 chars per token; upgrade to the model's tokenizer if tasks get close to ctx limits.
 const tokens = (s: string) => Math.ceil(s.length / 3.5);
 
-/** Auto-routing (spec §6): routing order, skip down, too-small ctx, and requires_ac machines not on AC. Idle ones first. */
+/** Auto-routing: routing order, skip down, too-small ctx, and requires_ac machines not on AC. Idle ones first. */
 export async function route(ctx: Ctx, need: number): Promise<{ picked: Endpoint[]; skipped: string[] }> {
   const skipped: string[] = [];
   const ok = await Promise.all(ctx.cfg.routing.map(async (id) => {
