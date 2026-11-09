@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "session-orchestrator": {
+      "type": "http",
+      "url": "https://claude-session-orchestrator.nurhakaltin.workers.dev/mcp"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "session-orchestrator",
+  "displayName": "Session Orchestrator",
+  "version": "0.1.0",
+  "description": "Manage all your Claude Code sessions across your machines from one place: see what is waiting for you, approve prompts, start, read and stop sessions, by voice or chat.",
+  "author": {
+    "name": "Nurhak",
+    "url": "https://github.com/Nurhak"
+  },
+  "homepage": "https://github.com/Nurhak/claude-session-orchestrator",
+  "repository": "https://github.com/Nurhak/claude-session-orchestrator",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "sessions",
+    "tmux",
+    "voice",
+    "remote-control"
+  ],
+  "privacyPolicyUrl": "https://claude-session-orchestrator.nurhakaltin.workers.dev/privacy"
+}

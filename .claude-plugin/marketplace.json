@@ -1,0 +1,15 @@
+{
+  "name": "session-orchestrator",
+  "description": "Session Orchestrator: manage all your Claude Code sessions across machines from Claude.",
+  "owner": {
+    "name": "Nurhak",
+    "url": "https://github.com/Nurhak"
+  },
+  "plugins": [
+    {
+      "name": "session-orchestrator",
+      "source": "./plugin",
+      "description": "Manage all your Claude Code sessions across your machines from one place, by chat or voice."
+    }
+  ]
+}
