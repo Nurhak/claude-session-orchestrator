@@ -12,7 +12,7 @@ const Machine = z.object({
   projects_root: z.string().nullable().default('~/projects').transform((v) => v ?? '~'),
   local: z.boolean().default(false),
   // Command that starts Claude Code; tests swap it for a fake.
-  claude_cmd: z.string().default('claude --remote-control'),
+  claude_cmd: z.string().default('claude'),
 }).refine((m) => m.local || m.ssh_host, { message: 'ssh_host is required unless local: true' });
 
 const Project = z.object({

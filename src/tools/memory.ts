@@ -1,7 +1,7 @@
 // Shared memory: a git repo of markdown on hub ("brain").
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -28,11 +28,25 @@ export async function ensureBrain(dir = brainDir()) {
   }
 }
 
-/** Resolve a brain-relative path, refusing anything outside the repo or inside .git. */
+const inside = (root: string, p: string) => p === root || p.startsWith(root + sep);
+
+/**
+ * Resolve a brain-relative path, refusing anything outside the repo or inside .git.
+ * Symlinks can arrive through git or Syncthing, so the real (symlink-resolved) location of the
+ * path, or of its deepest existing ancestor, must also be inside the brain.
+ * shortcut: check-then-use, so a symlink swapped in between can still race; fine for a single-user brain.
+ */
 export function brainPath(rel: string, dir = brainDir()): string {
   const p = resolve(dir, rel.replace(/^\/+/, ''));
-  if (p !== dir && !p.startsWith(dir + sep)) throw new UserError(`Path ${rel} is outside the brain.`);
-  if (relative(dir, p).split(sep).includes('.git')) throw new UserError('The .git folder is off limits.');
+  if (!inside(dir, p)) throw new UserError(`Path ${rel} is outside the brain.`);
+  if (relative(dir, p).split(sep).some((c) => c.toLowerCase() === '.git')) throw new UserError('The .git folder is off limits.');
+  let existing = p;
+  for (;;) {
+    try { lstatSync(existing); break; } catch { existing = dirname(existing); } // lstat: a dangling link counts as existing
+  }
+  let real: string;
+  try { real = realpathSync(existing); } catch { throw new UserError(`Path ${rel} is a broken link.`); }
+  if (!inside(realpathSync(dir), real)) throw new UserError(`Path ${rel} points outside the brain.`);
   return p;
 }
 
@@ -77,7 +91,8 @@ export function projectContext(ctx: Ctx, pid: string, dir = brainDir()) {
   const skip = new Set(['context.md', 'log.md', 'links.md']);
   const notes = mdFiles(join(dir, 'projects', p.id)).filter((f) => !skip.has(relative(join(dir, 'projects', p.id), f)));
   const linked = links(ctx, p.id, dir);
-  const shared = linked.flatMap((l) => mdFiles(brainPath(l, dir)));
+  // A link that points outside the brain is skipped, not fatal: one bad link must not block a session.
+  const shared = linked.flatMap((l) => { try { return mdFiles(brainPath(l, dir)); } catch { return []; } });
   const skills = existsSync(join(dir, 'skills'))
     ? readdirSync(join(dir, 'skills'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
     : [];

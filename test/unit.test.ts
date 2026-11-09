@@ -100,3 +100,21 @@ test('real Claude Code 2.1.319 idle pane: statusline is not an action', async ()
   assert.equal(summarize(raw).last_action, 'OK');
   assert.equal(detectStatus(raw), undefined);
 });
+
+test('security: brainPath confines the real path, so symlinks cannot escape the brain', async () => {
+  const { symlinkSync, mkdirSync: mk } = await import('node:fs');
+  const { brainPath } = await import('../src/tools/memory.ts');
+  const root = mkdtempSync(join(tmpdir(), 'brainsec-'));
+  const brain = join(root, 'brain'), outside = join(root, 'outside');
+  mk(join(brain, 'shared'), { recursive: true }); mk(outside);
+  writeFileSync(join(outside, 'secret.env'), 'DUMMY_SECRET=1');
+  symlinkSync(join(outside, 'secret.env'), join(brain, 'shared', 'notes.md'));
+  symlinkSync(outside, join(brain, 'shared', 'sub'));
+  symlinkSync(join(outside, 'nope'), join(brain, 'dangling.md'));
+  assert.equal(brainPath('shared/new/deep.md', brain), join(brain, 'shared/new/deep.md'));
+  assert.throws(() => brainPath('../outside/secret.env', brain), /outside the brain/);
+  assert.throws(() => brainPath('shared/notes.md', brain), /points outside/);
+  assert.throws(() => brainPath('shared/sub/x.txt', brain), /points outside/);
+  assert.throws(() => brainPath('dangling.md', brain), /broken link/);
+  assert.throws(() => brainPath('.GIT/config', brain), /off limits/);
+});

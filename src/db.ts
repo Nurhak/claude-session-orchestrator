@@ -36,7 +36,8 @@ export class Db {
 
   upsertSession(s: Omit<SessionRow, 'status_since' | 'last_message'>) {
     this.db.prepare(`INSERT INTO sessions (name, machine, project, status, remote_control, status_since)
-      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET status = excluded.status, status_since = excluded.status_since`)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET machine = excluded.machine, project = excluded.project,
+        status = excluded.status, remote_control = excluded.remote_control, status_since = excluded.status_since`)
       .run(s.name, s.machine, s.project, s.status, s.remote_control, Date.now());
   }
 
