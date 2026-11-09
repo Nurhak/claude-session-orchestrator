@@ -56,11 +56,11 @@ npm ci
 cp config/machines.example.yaml config/machines.yaml   # your machines
 cp config/projects.example.yaml config/projects.yaml   # your projects and their spoken aliases
 cp config/llm.example.yaml config/llm.yaml             # optional: local models and agents
-cp .env.example .env                                   # set EVENTS_TOKEN and MCP_TOKEN: openssl rand -hex 32
+cp .env.example .env                                   # set EVENTS_TOKEN and MCP_TOKEN: openssl rand -hex 32 (chmod 600 .env)
 npm start                                              # http://127.0.0.1:8787/mcp
 ```
 
-Install the hooks on each machine. This adds `Notification`, `Stop` and `SessionEnd` hooks to `~/.claude/settings.json` and keeps your existing hooks:
+Install the hooks on each machine. This adds `Notification`, `Stop` and `SessionEnd` hooks to `~/.claude/settings.json` and keeps your existing hooks. Each machine receives only its own token, derived from `EVENTS_TOKEN`, so it can report only its own sessions:
 
 ```sh
 scripts/install-hooks.sh local hub http://127.0.0.1:8787
@@ -70,7 +70,7 @@ scripts/install-hooks.sh me@gpu gpu http://hub:8787
 Use it from Claude Code right away:
 
 ```sh
-claude mcp add -s user --transport http orchestrator http://127.0.0.1:8787/mcp
+claude mcp add -s user --transport http orchestrator http://127.0.0.1:8787/mcp --header "Authorization: Bearer $MCP_TOKEN"
 ```
 
 To use it from the Claude app or voice mode, publish `/mcp` through a Cloudflare Tunnel with Access in front, then add it as a custom connector. [deploy/README.md](deploy/README.md) covers that, plus systemd, skills, and Claude Code sessions as clients.
@@ -80,7 +80,7 @@ To use it from the Claude app or voice mode, publish `/mcp` through a Cloudflare
 - `machines.yaml`: `id`, `ssh_host`, `user`, `os` (`linux` or `macos`), `projects_root`, `local: true` for the hub itself, and an optional `claude_cmd`.
 - `projects.yaml`: `id`, spoken `aliases`, default `machine`, `path`, and `shared` brain paths to always include.
 - `llm.yaml`: `endpoints` (`id`, `machine`, `url` including `/v1`, `model`, `ctx`, `requires_ac`), `routing.order`, and `agents` (`url` or `cmd`).
-- `.env`: `EVENTS_TOKEN`, `MCP_TOKEN`, `PORT`, `HOST`, `DB_PATH`, `CONFIG_DIR`, `BRAIN_DIR`, `REMOTE_BRAIN_DIR`, `BRAIN_PUSH`, `LLM_TIMEOUT_S`.
+- `.env`: `EVENTS_TOKEN`, `MCP_TOKEN`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `PORT`, `HOST`, `DB_PATH`, `CONFIG_DIR`, `BRAIN_DIR`, `REMOTE_BRAIN_DIR`, `BRAIN_PUSH`, `LLM_TIMEOUT_S`.
 
 ### Shared memory layout
 
@@ -99,11 +99,12 @@ At `session_start`, `context.md` is rebuilt from the project's notes, its linked
 
 ## Security model
 
-- `/mcp` trusts loopback callers only, meaning cloudflared on the same host behind Cloudflare Access. Everyone else needs `Authorization: Bearer $MCP_TOKEN`.
-- `/events` always needs `EVENTS_TOKEN`.
-- There is no general "run a shell command" tool; only the tools above. Every argument is shell-quoted, and session names are validated.
-- Destructive actions (`session_stop kill`, `memory_delete`) need `confirm=true`. Brain paths can't escape the repo or touch `.git`.
-- Use a dedicated, key-only SSH user. Secrets live in `.env`, which is gitignored.
+- **No caller is trusted by network address.** Every `/mcp` request needs `Authorization: Bearer $MCP_TOKEN` (Claude Code, scripts) or a valid Cloudflare Access JWT (the Claude app through the tunnel). The JWT is checked for its signature against your team's Access certs, plus its audience (`CF_ACCESS_AUD`), issuer and expiry. Loopback gets no exception, because every process on the host shares it and a DNS-rebinding web page arrives from it.
+- **`/events`** needs the sending machine's own token, `HMAC-SHA256(EVENTS_TOKEN, machine-id)`. A machine can only report sessions that belong to it. On every machine the hook script reads the token from a 0600 file, never from its command line.
+- There is no general "run a shell command" tool; only the tools above. Every argument is shell-quoted, session names are validated, and tmux targets match session names exactly.
+- Destructive actions (`session_stop kill`, `memory_delete`) need `confirm=true`. Brain paths can't escape the repo, even through symlinks, or touch `.git`.
+- Use a dedicated, key-only SSH user. Secrets live in `.env`, which is gitignored; keep it `chmod 600`.
+- Security fixes are tracked in the commit history, with a regression test for each. The project was audited with [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill).
 
 ## Development
 

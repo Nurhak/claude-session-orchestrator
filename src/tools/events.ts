@@ -14,14 +14,19 @@ export function statusFor(hook: { hook_event_name?: string; message?: string }):
   return undefined;
 }
 
-/** POST /events?session=cc-x&machine=gpu with the hook JSON as body. Returns an HTTP status code. */
-export function ingest(ctx: Ctx, session: string, machine: string | undefined, body: unknown): number {
+/**
+ * POST /events?session=cc-x&machine=gpu with the hook JSON as body. Returns an HTTP status code.
+ * `machine` has already been authenticated by its per-machine token.
+ */
+export function ingest(ctx: Ctx, session: string, machine: string, body: unknown): number {
   if (!SESSION_RE.test(session)) return 400;
   const hook = (body ?? {}) as { hook_event_name?: string; message?: string; reason?: string };
   const status = statusFor(hook);
   if (!status) return 400;
-  if (!ctx.db.session(session)) {
-    if (!machine || !ctx.cfg.machines.some((m) => m.id === machine)) return 404;
+  const existing = ctx.db.session(session);
+  if (existing && existing.machine !== machine) return 403; // a machine may only report its own sessions
+  if (!existing) {
+    if (!ctx.cfg.machines.some((m) => m.id === machine)) return 404;
     ctx.db.upsertSession({ name: session, machine, project: session.slice(3).replace(/-[^-]+$/, ''), status: 'idle', remote_control: 0 });
   }
   const before = ctx.db.session(session)!;

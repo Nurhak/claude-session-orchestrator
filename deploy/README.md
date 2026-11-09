@@ -27,7 +27,7 @@ scripts/install-hooks.sh orchestrator@macbook macbook http://hub:8787
 scripts/link-skills.sh orchestrator@gpu    # once the brain is synced there; same for macbook, local
 ```
 
-For gpu and macbook to reach `/events`, set `HOST=0.0.0.0` (or hub's Tailscale IP) in `.env`. From the tailnet, `/mcp` then requires `Authorization: Bearer $MCP_TOKEN`. Loopback, which is cloudflared, does not.
+For gpu and macbook to reach `/events`, set `HOST=0.0.0.0` (or hub's Tailscale IP) in `.env`. Every `/mcp` client needs `Authorization: Bearer $MCP_TOKEN`, local ones included. The one exception is the tunnel, which uses the Cloudflare Access JWT (step 3).
 
 Check: start a session, wait for a permission prompt, and `events_pending` shows it within 10 s.
 
@@ -40,7 +40,7 @@ cloudflared tunnel create session-orchestrator
 sudo cp deploy/cloudflared.yml /etc/cloudflared/config.yml && sudo cloudflared service install
 ```
 
-In Cloudflare Zero Trust, add a self-hosted Access application for the hostname with one Allow policy: your email only. Claude connects to remote MCP servers with OAuth, so turn on Access's OAuth/MCP support for that application, so the connector's login goes through Access. Check the current Cloudflare docs for "MCP server" under Access before relying on this. Cloudflare's UI changes, and this step could not be tested from here.
+In Cloudflare Zero Trust, add a self-hosted Access application for the hostname with one Allow policy: your email only. Copy the application's **Audience (AUD) tag** into `.env` as `CF_ACCESS_AUD`, and your team domain (`<team>.cloudflareaccess.com`) as `CF_ACCESS_TEAM_DOMAIN`. The server then accepts tunnel requests only when they carry a valid `Cf-Access-Jwt-Assertion`. Without these two values, tunnel requests are rejected. Claude connects to remote MCP servers with OAuth, so turn on Access's OAuth/MCP support for that application, so the connector's login goes through Access. Check the current Cloudflare docs for "MCP server" under Access before relying on this. Cloudflare's UI changes, and this step could not be tested from here.
 
 Check: `curl -i https://<hostname>/mcp` without logging in returns a redirect or 401 from Cloudflare, never a response from this server. The only other path the tunnel exposes is the 404 fallback.
 

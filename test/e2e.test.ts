@@ -13,6 +13,7 @@ import { app } from '../src/server.ts';
 import { Db } from '../src/db.ts';
 import type { Config } from '../src/config.ts';
 import { ensureBrain } from '../src/tools/memory.ts';
+import { machineToken } from '../src/auth.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'orch-'));
 process.env.TMUX_TMPDIR = tmp; // private tmux server, inherited by every child process
@@ -73,7 +74,7 @@ before(async () => {
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
   client = new Client({ name: 'test', version: '0' });
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: 'Bearer mcp-secret' } } }));
 });
 after(async () => {
   await client.close();
@@ -156,7 +157,7 @@ test('session lifecycle over MCP + hooks', async () => {
   assert.match(read.waiting_for, /Do you want to proceed/);
 
   // Hook arrives.
-  const post = (body: unknown, token = 'secret') => fetch(`${base}/events?session=${name}`, {
+  const post = (body: unknown, token = machineToken('secret', 'node2')) => fetch(`${base}/events?session=${name}&machine=node2`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
   });
   assert.equal((await post({ hook_event_name: 'Notification', message: 'x' }, 'wrong')).status, 401);
@@ -226,18 +227,78 @@ test('agent_run / agent_status', async () => {
   assert.equal(s.result, 'BUILD IT');
 });
 
-test('/mcp needs MCP_TOKEN from non-loopback callers', async () => {
-  const { networkInterfaces } = await import('node:os');
-  const ip = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
-  if (!ip) return; // no non-loopback interface in this sandbox
-  const s2 = app({ cfg, db }, 'secret', 'mcp-secret');
-  await new Promise<void>((r) => s2.listen(0, ip, r));
-  const url = `http://${ip}:${(s2.address() as AddressInfo).port}/mcp`;
-  const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } };
-  const h = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
-  assert.equal((await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(init) })).status, 401);
-  assert.equal((await fetch(url, { method: 'POST', headers: { ...h, authorization: 'Bearer mcp-secret' }, body: JSON.stringify(init) })).status, 200);
-  s2.close();
+const INIT = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } };
+const MCP_H = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+const mcpPost = (headers: Record<string, string> = {}) => fetch(`${base}/mcp`, { method: 'POST', headers: { ...MCP_H, ...headers }, body: JSON.stringify(INIT) });
+
+test('security: /mcp trusts no network address (loopback and DNS-rebinding requests need a credential)', async () => {
+  assert.equal((await mcpPost()).status, 401);
+  assert.equal((await mcpPost({ host: 'attacker.example', origin: 'http://attacker.example' })).status, 401);
+  assert.equal((await mcpPost({ authorization: 'Bearer wrong' })).status, 401);
+  assert.equal((await mcpPost({ authorization: 'Bearer mcp-secret' })).status, 200);
+});
+
+test('security: Cloudflare Access JWT is verified (signature, audience, issuer, expiry)', async () => {
+  const { generateKeyPairSync, sign } = await import('node:crypto');
+  const { resetAccessKeys } = await import('../src/auth.ts');
+  const good = generateKeyPairSync('rsa', { modulusLength: 2048 }), evil = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...good.publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'RS256', use: 'sig' };
+  const certs = createServer((_q, r) => r.end(JSON.stringify({ keys: [jwk] })));
+  await new Promise<void>((r) => certs.listen(0, '127.0.0.1', r));
+  Object.assign(process.env, {
+    CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud-123',
+    CF_ACCESS_CERTS_URL: `http://127.0.0.1:${(certs.address() as AddressInfo).port}/certs`,
+  });
+  resetAccessKeys();
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = (claims: object, key = good.privateKey, kid = 'k1') => {
+    const head = `${b64({ alg: 'RS256', kid })}.${b64(claims)}`;
+    return `${head}.${sign('sha256', Buffer.from(head), key).toString('base64url')}`;
+  };
+  const now = Math.floor(Date.now() / 1000);
+  const ok = { aud: ['aud-123'], iss: 'https://team.cloudflareaccess.com', exp: now + 300, email: 'me@example.com' };
+  try {
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt(ok) })).status, 200);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt(ok, evil.privateKey) })).status, 401);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt({ ...ok, aud: ['other'] }) })).status, 401);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt({ ...ok, iss: 'https://evil.example' }) })).status, 401);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt({ ...ok, exp: now - 10 }) })).status, 401);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': jwt(ok, good.privateKey, 'unknown-kid') })).status, 401);
+    assert.equal((await mcpPost({ 'cf-access-jwt-assertion': 'not.a.jwt' })).status, 401);
+  } finally {
+    for (const k of ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD', 'CF_ACCESS_CERTS_URL']) delete process.env[k];
+    resetAccessKeys();
+    certs.close();
+  }
+});
+
+test('security: a hook sender is bound to its own machine', async () => {
+  db.upsertSession({ name: 'cc-app-ab12', machine: 'mac', project: 'app', status: 'working', remote_control: 0 });
+  const ev = (machine: string, token: string, session = 'cc-app-ab12') => fetch(`${base}/events?session=${session}&machine=${machine}`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' }),
+  });
+  assert.equal((await ev('node2', 'secret')).status, 401); // the shared master secret is not a machine token
+  assert.equal((await ev('mac', machineToken('secret', 'node2'))).status, 401); // node2's token cannot claim mac
+  assert.equal((await ev('node2', machineToken('secret', 'node2'))).status, 403); // nor touch mac's session
+  assert.equal(db.session('cc-app-ab12')!.status, 'working');
+  assert.equal((await ev('mac', machineToken('secret', 'mac'))).status, 204);
+  assert.equal(db.session('cc-app-ab12')!.status, 'waiting_approval');
+  db.setStatus('cc-app-ab12', 'stopped');
+});
+
+test('security: notify.sh never puts the hook token on the command line', () => {
+  const home = join(tmp, 'hookhome'), bin = join(tmp, 'hookbin');
+  mkdirSync(join(home, '.config'), { recursive: true }); mkdirSync(bin, { recursive: true });
+  writeFileSync(join(home, '.config', 'cc-orchestrator.env'), 'ORCH_URL=http://127.0.0.1:9\nORCH_MACHINE=node2\n');
+  writeFileSync(join(home, '.config', 'cc-orchestrator.hdr'), 'Authorization: Bearer TOKEN-MARKER-123\n');
+  writeFileSync(join(bin, 'tmux'), '#!/bin/sh\necho cc-app-ab12\n');
+  writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s ' "$@" > ${join(tmp, 'curl-argv.txt')}\n`);
+  chmodSync(join(bin, 'tmux'), 0o755); chmodSync(join(bin, 'curl'), 0o755);
+  execSync(`echo '{"hook_event_name":"Stop"}' | sh hooks/notify.sh`, { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, TMUX: 'x' } });
+  const argv = readFileSync(join(tmp, 'curl-argv.txt'), 'utf8');
+  assert.match(argv, /-H @.*cc-orchestrator\.hdr/);
+  assert.doesNotMatch(argv, /TOKEN-MARKER-123/);
 });
 
 test('security: stale row never reaches a prefix-matching live session (exact tmux targets)', async () => {

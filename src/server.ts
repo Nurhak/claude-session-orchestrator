@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { accessJwtOk, machineTokenOk, tokenOk } from './auth.ts';
 import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
 import type { Ctx } from './tools/common.ts';
@@ -24,8 +24,6 @@ export async function boot() {
   return ctx;
 }
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
 async function readJson(req: IncomingMessage, limit = 1 << 20): Promise<unknown> {
   let size = 0;
   const chunks: Buffer[] = [];
@@ -37,22 +35,15 @@ async function readJson(req: IncomingMessage, limit = 1 << 20): Promise<unknown>
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
 }
 
-function tokenOk(req: IncomingMessage, token: string | undefined) {
-  if (!token) return false;
-  const got = Buffer.from((req.headers.authorization ?? '').replace(/^Bearer /, ''));
-  const want = Buffer.from(token);
-  return got.length === want.length && timingSafeEqual(got, want);
-}
-
 export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN, mcpToken = process.env.MCP_TOKEN) {
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://x');
     try {
       if (url.pathname === '/mcp') {
         if (req.method !== 'POST') return void res.writeHead(405).end();
-        // Loopback = cloudflared on this host, already behind Cloudflare Access.
-        // Anything else (Claude Code sessions over Tailscale) must bring MCP_TOKEN.
-        if (!LOOPBACK.has(req.socket.remoteAddress ?? '') && !tokenOk(req, mcpToken)) return void res.writeHead(401).end();
+        // Every caller needs a credential: MCP_TOKEN (Claude Code, scripts) or a valid Cloudflare
+        // Access JWT (the Claude app via the tunnel). Network address is never trusted.
+        if (!tokenOk(req, mcpToken) && !(await accessJwtOk(req))) return void res.writeHead(401).end();
         // Stateless: a fresh server + transport per request; all state lives in SQLite.
         const server = mcpServer(ctx);
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -60,8 +51,10 @@ export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN, mcpToken =
         await server.connect(transport);
         await transport.handleRequest(req, res, await readJson(req));
       } else if (url.pathname === '/events' && req.method === 'POST') {
-        if (!tokenOk(req, eventsToken)) return void res.writeHead(401).end();
-        const code = events.ingest(ctx, url.searchParams.get('session') ?? '', url.searchParams.get('machine') ?? undefined, await readJson(req));
+        // The per-machine token authenticates the machine; ingest only touches that machine's sessions.
+        const machine = url.searchParams.get('machine') ?? '';
+        if (!machineTokenOk(req, eventsToken, machine)) return void res.writeHead(401).end();
+        const code = events.ingest(ctx, url.searchParams.get('session') ?? '', machine, await readJson(req));
         res.writeHead(code).end();
       } else if (url.pathname === '/health') {
         res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
@@ -78,6 +71,7 @@ export function app(ctx: Ctx, eventsToken = process.env.EVENTS_TOKEN, mcpToken =
 if (import.meta.main) {
   const ctx = await boot();
   if (!process.env.EVENTS_TOKEN) console.warn('EVENTS_TOKEN is not set: /events will reject every hook.');
+  if (!process.env.MCP_TOKEN && !process.env.CF_ACCESS_AUD) console.warn('Neither MCP_TOKEN nor CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUD is set: /mcp will reject every request.');
   const port = Number(process.env.PORT ?? 8787), host = process.env.HOST ?? '127.0.0.1';
   app(ctx).listen(port, host, () => console.log(`session-orchestrator on http://${host}:${port}/mcp`));
 }
