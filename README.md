@@ -75,6 +75,20 @@ claude mcp add -s user --transport http orchestrator http://127.0.0.1:8787/mcp -
 
 To use it from the Claude app or voice mode, publish `/mcp` through a Cloudflare Tunnel with Access in front, then add it as a custom connector. [deploy/README.md](deploy/README.md) covers that, plus systemd, skills, and Claude Code sessions as clients.
 
+## Hosted mode (beta)
+
+Instead of exposing your own server, sign in to the hosted service with GitHub or Google, and let your hub **dial out** to it:
+
+1. In Claude, add a custom connector with the service's `/mcp` URL and sign in.
+2. Open `/dashboard` on the service, create an agent token, and add it to your hub's `.env`:
+   ```sh
+   ORCH_CLOUD_URL=wss://<service>/agent
+   ORCH_AGENT_TOKEN=cso_...
+   ```
+3. Run `npm start` as usual. The agent connects out (nothing listens publicly) and serves the same 22 tools to your signed-in account only.
+
+The hosted part, in `worker/`, is a Cloudflare Worker. It handles OAuth 2.1 with `@cloudflare/workers-oauth-provider`, runs a stateless `/mcp` endpoint, and keeps one Durable Object per user holding that user's agent connection. It stores no tool arguments, sessions, keys or notes. Those stay on your machine. See [worker/README.md](worker/README.md) to deploy your own.
+
 ## Configuration
 
 - `machines.yaml`: `id`, `ssh_host`, `user`, `os` (`linux` or `macos`), `projects_root`, `local: true` for the hub itself, and an optional `claude_cmd`.

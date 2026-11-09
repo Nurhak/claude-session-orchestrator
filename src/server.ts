@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { accessJwtOk, machineTokenOk, tokenOk } from './auth.ts';
+import { connectCloud } from './cloud.ts';
 import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
 import type { Ctx } from './tools/common.ts';
@@ -74,4 +75,8 @@ if (import.meta.main) {
   if (!process.env.MCP_TOKEN && !process.env.CF_ACCESS_AUD) console.warn('Neither MCP_TOKEN nor CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUD is set: /mcp will reject every request.');
   const port = Number(process.env.PORT ?? 8787), host = process.env.HOST ?? '127.0.0.1';
   app(ctx).listen(port, host, () => console.log(`session-orchestrator on http://${host}:${port}/mcp`));
+  // Agent mode for the hosted service: dial out and serve tool calls for the signed-in owner.
+  if (process.env.ORCH_CLOUD_URL && process.env.ORCH_AGENT_TOKEN) {
+    await connectCloud(() => mcpServer(ctx), process.env.ORCH_CLOUD_URL, process.env.ORCH_AGENT_TOKEN);
+  }
 }

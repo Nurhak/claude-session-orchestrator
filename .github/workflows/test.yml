@@ -15,3 +15,23 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: sudo apt-get install -y tmux
+      - run: npm ci
+      - run: npm ci
+        working-directory: worker
+      - run: npx tsc
+        working-directory: worker
+      - name: Hosted end-to-end test (wrangler dev, local only)
+        working-directory: worker
+        run: |
+          printf 'DEV_LOGIN=1\nCOOKIE_SECRET=%s\n' "$(openssl rand -hex 32)" > .dev.vars
+          npx wrangler dev --port 8788 --ip 127.0.0.1 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8788/ && break; sleep 1; done
+          node test/e2e.mjs || (cat wrangler.log; exit 1)

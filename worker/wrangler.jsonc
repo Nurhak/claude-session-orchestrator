@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "claude-session-orchestrator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  "durable_objects": { "bindings": [{ "name": "USER_HUB", "class_name": "UserHub" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserHub"] }],
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+  // Secrets (wrangler secret put): COOKIE_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET,
+  // GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET. Local only (.dev.vars): DEV_LOGIN=1.
+}
