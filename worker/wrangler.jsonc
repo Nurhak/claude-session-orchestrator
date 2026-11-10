@@ -5,7 +5,7 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "a216686d836c4455bd1aa6eea7a7ee62" }],
   "durable_objects": { "bindings": [{ "name": "USER_HUB", "class_name": "UserHub" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserHub"] }],
   "observability": { "enabled": true, "head_sampling_rate": 1 }
