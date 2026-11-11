@@ -28,9 +28,23 @@ const setPower = (src: 'AC Power' | 'Battery Power') => {
 };
 setPower('AC Power');
 
-// Fake claude: echoes each line as an action; "ask" shows a permission prompt.
-const FAKE = `sh -c 'echo "args: $*"; while read l; do echo "⏺ Update(src/$l.ts)"; ` +
-  `if [ "$l" = ask ]; then printf "Do you want to proceed?\\n❯ 1. Yes\\n"; else seq 15; fi; done' fake`;
+// Fake claude: echoes each line as an action; "ask" shows a permission prompt. Like Claude Code, it
+// writes a JSONL transcript to $HOME/.claude/projects/<dir>/<--session-id>.jsonl.
+process.env.HOME = join(tmp, 'home');
+const FAKE = join(tmp, 'bin', 'fake-claude');
+writeFileSync(FAKE, `#!/bin/sh
+sid=; prev=; for a in "$@"; do [ "$prev" = --session-id ] && sid=$a; prev=$a; done
+t="$HOME/.claude/projects/fake/$sid.jsonl"; mkdir -p "$HOME/.claude/projects/fake"
+echo "args: $*"
+while read l; do
+  echo "⏺ Update(src/$l.ts)"
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$l" >> "$t"
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/%s.ts"}}]}}\\n' "$l" >> "$t"
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done with %s. All good."}]}}\\n' "$l" >> "$t"
+  if [ "$l" = ask ]; then printf "Do you want to proceed?\\n❯ 1. Yes\\n"; else seq 15; fi
+done
+`);
+chmodSync(FAKE, 0o755);
 
 // Fake OpenAI-compatible endpoint that says which model answered.
 const fakeLlm = createServer(async (req, res) => {
@@ -87,7 +101,7 @@ test('lists all tools', async () => {
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, ['agent_run', 'agent_status', 'events_pending', 'llm_list', 'llm_run', 'machine_list', 'machine_status',
     'memory_append', 'memory_delete', 'memory_link', 'memory_read', 'memory_search', 'memory_write', 'overview', 'project_context',
-    'session_approve', 'session_interrupt', 'session_list', 'session_read', 'session_send', 'session_start', 'session_stop']);
+    'session_approve', 'session_interrupt', 'session_list', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait']);
 });
 
 test('unreachable Mac fails fast with a speakable error', async () => {
@@ -141,18 +155,18 @@ test('memory tools, and shared knowledge reaches a new session', async () => {
 });
 
 test('session lifecycle over MCP + hooks', async () => {
-  const start = await call('session_start', { project: 'the demo', prompt: "first 'task'" });
+  const start = await call('session_start', { project: 'the demo', prompt: "first 'task'", wait: 0 });
   assert.ok(!start.err, start.summary);
   const name: string = start.session;
   assert.match(name, /^cc-demo-[0-9a-f]{4}$/);
   await wait(300);
 
   let read = await call('session_read', { session: 'demo', mode: 'tail' });
-  assert.match(read.text, new RegExp(`args: --remote-control ${name} first 'task'`));
+  assert.match(read.text, new RegExp(`args: --remote-control ${name} --session-id [0-9a-f-]{36} first 'task'`));
 
-  await call('session_send', { session: name, message: 'ask' });
+  await call('session_send', { session: name, message: 'ask', wait: 0 });
   await wait(500);
-  read = await call('session_read', { session: name });
+  read = await call('session_read', { session: name, mode: 'summary' });
   assert.equal(read.changed_files_count, 1);
   assert.match(read.waiting_for, /Do you want to proceed/);
 
@@ -169,12 +183,12 @@ test('session lifecycle over MCP + hooks', async () => {
   const ov = await call('overview');
   assert.match(ov.summary, /1 sessions: 1 waiting for approval/);
 
-  const ap = await call('session_approve', { session: name, choice: 'yes' });
+  const ap = await call('session_approve', { session: name, choice: 'yes', wait: 0 });
   assert.ok(!ap.err, ap.summary);
-  await call('session_send', { session: name, message: 'go' }); // fake gets "1go", scrolls the prompt away
+  await call('session_send', { session: name, message: 'go', wait: 0 }); // fake gets "1go", scrolls the prompt away
   await wait(400);
   assert.equal((await call('events_pending')).pending.length, 0);
-  assert.match((await call('session_approve', { session: name, choice: 'yes' })).summary, /not waiting for approval/);
+  assert.match((await call('session_approve', { session: name, choice: 'yes', wait: 0 })).summary, /not waiting for approval/);
 
   assert.equal((await post({ hook_event_name: 'Stop' })).status, 204);
   const list = await call('session_list');
@@ -324,4 +338,22 @@ test('security: pane text cannot forge snapshot records for other sessions', asy
   assert.ok(!names.includes('cc-ghost-0003'));
   assert.equal(new Set(names).size, names.length);
   execSync(`tmux kill-session -t '=cc-zevil-0001'`);
+});
+
+test('fast loop: session_send waits and returns the exact reply from the transcript', async () => {
+  const start = await call('session_start', { project: 'demo', name: 'reply test' });
+  assert.ok(!start.err, start.summary);
+  const t0 = Date.now();
+  const r = await call('session_send', { session: 'cc-reply-test', message: 'hello' });
+  assert.ok(Date.now() - t0 < 20_000, 'returns once the turn ends, not after the full wait');
+  assert.equal(r.done, true);
+  assert.equal(r.reply, 'Done with hello. All good.');
+  assert.equal(r.prompt, 'hello');
+  assert.deepEqual(r.files_changed, ['src/hello.ts']);
+  assert.match(r.summary, /demo on node2 replied: Done with hello\. 1 file changed\./);
+  const read = await call('session_read', { session: 'cc-reply-test' });
+  assert.equal(read.reply, 'Done with hello. All good.');
+  const w = await call('session_wait', { session: 'cc-reply-test', seconds: 5 });
+  assert.equal(w.done, true);
+  await call('session_stop', { session: 'cc-reply-test', mode: 'kill', confirm: true });
 });

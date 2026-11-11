@@ -118,3 +118,26 @@ test('security: brainPath confines the real path, so symlinks cannot escape the 
   assert.throws(() => brainPath('dangling.md', brain), /broken link/);
   assert.throws(() => brainPath('.GIT/config', brain), /off limits/);
 });
+
+test('lastTurn reads the latest turn from a Claude Code transcript', async () => {
+  const { lastTurn } = await import('../src/transcript.ts');
+  const L = (o: object) => JSON.stringify(o);
+  const jsonl = [
+    '{"partial line from tail',
+    L({ type: 'user', message: { content: 'old prompt' } }),
+    L({ type: 'assistant', message: { content: [{ type: 'text', text: 'old reply' }] } }),
+    L({ type: 'user', message: { content: 'fix the login bug' } }),
+    L({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] } }),
+    L({ type: 'user', message: { content: [{ type: 'tool_result', content: '2 failed' }] } }),
+    L({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: 'meta' }] } }),
+    L({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'SUBAGENT' }] } }),
+    L({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'src/login.ts' } }] } }),
+    L({ type: 'assistant', message: { content: [{ type: 'text', text: 'Fixed the token check. Tests pass now.' }] } }),
+    L({ type: 'system', stopReason: 'end' }),
+  ].join('\n');
+  const t = lastTurn(jsonl);
+  assert.equal(t.prompt, 'fix the login bug');
+  assert.equal(t.reply, 'Fixed the token check. Tests pass now.');
+  assert.deepEqual(t.actions, ['Bash: npm test', 'Edit: src/login.ts']);
+  assert.deepEqual(t.files, ['src/login.ts']);
+});

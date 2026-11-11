@@ -26,7 +26,7 @@ Ask "how are my projects doing?" while you're away from the keyboard. Then start
                                           └───── hooks POST /events (Bearer EVENTS_TOKEN) ─────┘
 ```
 
-## Tools (22)
+## Tools (23)
 
 | Tool | What it does |
 | --- | --- |
@@ -35,9 +35,10 @@ Ask "how are my projects doing?" while you're away from the keyboard. Then start
 | `machine_list()` / `machine_status(machine)` | Reachability, session count, laptop power (AC or battery); CPU, RAM, disk, GPU/VRAM, link type, LLM endpoints |
 | `session_list(machine?)` | Status: `working`, `waiting_input`, `waiting_approval`, `idle` or `stopped` |
 | `session_start(project, machine?, prompt?, remote_control=true, name?)` | Refreshes the shared context, then starts Claude Code in tmux |
-| `session_read(session, mode=summary\|tail, lines)` | Last action, what it is waiting for, last error, files changed; or a cleaned tail of the output |
-| `session_send(session, message)` | Types a message and presses Enter |
-| `session_approve(session, yes\|no\|always)` | Answers the menu on screen (tool permissions, trust dialogs) |
+| `session_read(session, mode=reply\|summary\|tail)` | `reply` (default): the latest reply text, tools used and files changed, read from Claude Code's own transcript; or a short terminal status, or the cleaned terminal text |
+| `session_send(session, message, wait=45)` | Types a message, presses Enter, and waits for the reply in the same call |
+| `session_wait(session, seconds=60)` | Waits for a working session to finish its turn, then returns its reply |
+| `session_approve(session, yes\|no\|always, wait=30)` | Answers the menu on screen (tool permissions, trust dialogs) and waits for what happens next |
 | `session_interrupt(session)` / `session_stop(session, graceful\|kill, confirm?)` | Esc / `/exit`, or kill (kill needs `confirm=true`) |
 | `memory_search` / `memory_read` / `memory_write` / `memory_append` / `memory_delete` | The brain; every write is a git commit, and delete needs `confirm=true` |
 | `memory_link(project, shared_path)` / `project_context(project)` | Link shared knowledge to a project / get everything a session on that project should know |
@@ -85,7 +86,7 @@ Instead of exposing your own server, sign in to the hosted service with GitHub o
    ORCH_CLOUD_URL=wss://<service>/agent
    ORCH_AGENT_TOKEN=cso_...
    ```
-3. Run `npm start` as usual. The agent connects out (nothing listens publicly) and serves the same 22 tools to your signed-in account only.
+3. Run `npm start` as usual. The agent connects out (nothing listens publicly) and serves the same 23 tools to your signed-in account only.
 
 The hosted part, in `worker/`, is a Cloudflare Worker. It handles OAuth 2.1 with `@cloudflare/workers-oauth-provider`, runs a stateless `/mcp` endpoint, and keeps one Durable Object per user holding that user's agent connection. It stores no tool arguments, sessions, keys or notes. Those stay on your machine. See [worker/README.md](worker/README.md) to deploy your own.
 

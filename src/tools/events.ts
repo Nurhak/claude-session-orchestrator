@@ -3,6 +3,7 @@ import type { Status } from '../summarize.ts';
 import { SESSION_RE } from '../tmux.ts';
 import { ago, tool, type Ctx } from './common.ts';
 import { refresh, writeLog } from './sessions.ts';
+import { isSessionId, isTranscriptPath } from '../transcript.ts';
 
 /** Hook payload (Claude Code hook stdin JSON) → session status. Spec §13. */
 export function statusFor(hook: { hook_event_name?: string; message?: string }): Status | undefined {
@@ -20,7 +21,7 @@ export function statusFor(hook: { hook_event_name?: string; message?: string }):
  */
 export function ingest(ctx: Ctx, session: string, machine: string, body: unknown): number {
   if (!SESSION_RE.test(session)) return 400;
-  const hook = (body ?? {}) as { hook_event_name?: string; message?: string; reason?: string };
+  const hook = (body ?? {}) as { hook_event_name?: string; message?: string; reason?: string; session_id?: unknown; transcript_path?: unknown };
   const status = statusFor(hook);
   if (!status) return 400;
   const existing = ctx.db.session(session);
@@ -32,6 +33,7 @@ export function ingest(ctx: Ctx, session: string, machine: string, body: unknown
   const before = ctx.db.session(session)!;
   const msg = (hook.message ?? hook.reason)?.slice(0, 500) ?? null;
   ctx.db.setStatus(session, status, msg);
+  ctx.db.setTranscript(session, isSessionId(hook.session_id) ? hook.session_id : null, isTranscriptPath(hook.transcript_path) ? hook.transcript_path : null);
   ctx.db.addEvent(session, hook.hook_event_name!, status, msg);
   // Ended outside session_stop (e.g. /exit typed in the Claude app): log it in the background.
   if (status === 'stopped' && before.status !== 'stopped') {

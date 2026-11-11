@@ -1,11 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { findMachine, findProject, projectDir, UserError, type Machine } from '../config.ts';
 import { injectContext, logSession } from './memory.ts';
 import type { SessionRow } from '../db.ts';
 import { detectStatus, menuKeys, summarize, tail, type Status } from '../summarize.ts';
 import * as tmux from '../tmux.ts';
+import { lastTurn, readTranscript } from '../transcript.ts';
 import { q, qpath, runOk } from '../transport/ssh.ts';
 import { ago, tool, type Ctx } from './common.ts';
 
@@ -81,6 +82,61 @@ export async function writeLog(ctx: Ctx, s: SessionRow, m: Machine, note?: strin
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const DONE: Status[] = ['idle', 'waiting_input', 'waiting_approval', 'stopped'];
+const WAIT = (dflt: number) => z.number().int().min(0).max(100).default(dflt)
+  .describe('Seconds to wait for the session to finish its turn and return its reply (0 = return at once; max 100)');
+
+/**
+ * Wait until the session's turn ends: a hook reports idle/waiting after `since`, or (without hooks)
+ * the pane shows a permission prompt, or stops showing "esc to interrupt" for two polls in a row.
+ */
+async function waitTurn(ctx: Ctx, name: string, m: Machine, since: number, seconds: number): Promise<boolean> {
+  const end = Date.now() + seconds * 1000;
+  let quiet = 0;
+  while (Date.now() < end) {
+    await sleep(2000);
+    const row = ctx.db.session(name);
+    if (row && DONE.includes(row.status) && row.status_since > since) return true;
+    const pane = await tmux.capture(m, name, 30).catch(() => null);
+    if (pane === null) return true; // session is gone
+    const seen = detectStatus(pane);
+    if (seen === 'waiting_approval') { ctx.db.setStatus(name, 'waiting_approval'); return true; }
+    quiet = seen === 'working' ? 0 : quiet + 1;
+    if (quiet >= 2 && Date.now() - since > 4000) return true;
+  }
+  return false;
+}
+
+/** The session's latest turn: exact reply from the transcript, else a pane summary. */
+async function report(ctx: Ctx, name: string, m: Machine, done = true) {
+  const row = ctx.db.session(name)!;
+  const label = `${row.project} on ${m.id}`;
+  const status = SPOKEN[row.status];
+  const raw = await readTranscript(m, row.transcript, row.claude_id).catch(() => null);
+  if (raw) {
+    const t = lastTurn(raw);
+    const first = t.reply.split(/(?<=[.!?])\s/)[0]?.slice(0, 220) ?? '';
+    const changed = t.files.length ? ` ${t.files.length} file${t.files.length === 1 ? '' : 's'} changed.` : '';
+    const head = !done ? `${label} is still working.` : row.status === 'waiting_approval' ? `${label} is waiting for your approval.` : `${label} replied:`;
+    return {
+      summary: `${head}${first ? ` ${first}` : ''}${changed}${!done ? ' Call session_wait to keep waiting.' : ''}`,
+      status: row.status, done, reply: t.reply || null, prompt: t.prompt, actions: t.actions, files_changed: t.files,
+      ...(row.status === 'waiting_approval' && { waiting_for: summarize(await tmux.capture(m, name, 30).catch(() => '')).waiting_for }),
+    };
+  }
+  const sum = summarize(await tmux.capture(m, name, 200).catch(() => ''));
+  const parts = [sum.waiting_for && `Waiting: ${sum.waiting_for}`, sum.last_action && `Last: ${sum.last_action}`,
+    sum.last_error && `Error: ${sum.last_error}`].filter(Boolean);
+  return { summary: `${label} is ${status}.${parts.length ? ` ${parts.join('. ')}.` : ''}${!done ? ' Call session_wait to keep waiting.' : ''}`, status: row.status, done, ...sum };
+}
+
+async function sendAndWait(ctx: Ctx, s: SessionRow & { m: Machine }, wait: number, sent: number) {
+  if (!wait) return null;
+  const done = await waitTurn(ctx, s.name, s.m, sent, wait);
+  return report(ctx, s.name, s.m, done);
+}
+
 export function line(s: LiveSession) {
   const where = s.reachable ? '' : ' (machine unreachable, last known)';
   return `${s.project} on ${s.machine}: ${SPOKEN[s.status]} since ${ago(s.status_since)}${where}.`;
@@ -108,8 +164,9 @@ export function register(server: McpServer, ctx: Ctx) {
       prompt: z.string().optional().describe('First message for the session'),
       remote_control: z.boolean().default(true),
       name: z.string().optional().describe('Custom short name; becomes cc-<name>'),
+      wait: WAIT(45),
     },
-    async ({ project, machine, prompt, remote_control, name }) => {
+    async ({ project, machine, prompt, remote_control, name, wait }) => {
       const p = findProject(ctx.cfg, project);
       const m = findMachine(ctx.cfg, machine ?? p.machine);
       const sname = name
@@ -123,23 +180,27 @@ export function register(server: McpServer, ctx: Ctx) {
       let warning: string | undefined;
       await injectContext(ctx, m, p.id).catch((e) => { warning = `Shared context not updated: ${(e as Error).message}`; });
       // --remote-control takes an optional name, so always pass one or the prompt would be eaten as the name.
-      const cmd = `${m.claude_cmd}${remote_control ? ` --remote-control ${q(sname)}` : ''}${prompt ? ` ${q(prompt)}` : ''}`;
+      // Our own session id makes the transcript findable: ~/.claude/projects/*/<id>.jsonl.
+      const claudeId = randomUUID();
+      const cmd = `${m.claude_cmd}${remote_control ? ` --remote-control ${q(sname)}` : ''} --session-id ${claudeId}${prompt ? ` ${q(prompt)}` : ''}`;
+      const started = Date.now();
       await tmux.newSession(m, sname, dir, cmd);
       ctx.db.upsertSession({ name: sname, machine: m.id, project: p.id, status: prompt ? 'working' : 'waiting_input', remote_control: remote_control ? 1 : 0 });
-      return {
-        summary: `Started ${p.id} on ${m.id} as ${sname}${prompt ? ', first prompt sent' : ''}${remote_control ? '; it will show in the Claude app' : ''}.${warning ? ` ${warning}` : ''}`,
-        session: sname,
-      };
+      ctx.db.setTranscript(sname, claudeId, null);
+      const base = `Started ${p.id} on ${m.id} as ${sname}${remote_control ? '; it shows in the Claude app' : ''}.${warning ? ` ${warning}` : ''}`;
+      const turn = prompt ? await sendAndWait(ctx, { ...ctx.db.session(sname)!, m }, wait, started) : null;
+      return turn ? { ...turn, summary: `${base} ${turn.summary}`, session: sname } : { summary: base, session: sname };
     });
 
-  tool(server, ctx, 'session_read', 'Read a session\'s recent output. summary mode returns last_action, waiting_for, last_error, changed_files_count; tail mode returns cleaned text.',
+  tool(server, ctx, 'session_read', 'Read a session. reply (default): its latest reply text, the tools it used and files it changed, from Claude Code\'s transcript. summary: a short status from the terminal. tail: the cleaned terminal text.',
     {
       session: z.string(),
-      mode: z.enum(['summary', 'tail']).default('summary'),
+      mode: z.enum(['reply', 'summary', 'tail']).default('reply'),
       lines: z.number().int().min(1).max(500).default(60),
     },
     async ({ session, mode, lines }) => {
       const s = resolve(ctx, session);
+      if (mode === 'reply') return report(ctx, s.name, s.m, ctx.db.session(s.name)!.status !== 'working');
       const raw = await tmux.capture(s.m, s.name, Math.max(lines, 200));
       if (mode === 'tail') return { summary: `Last ${lines} lines of ${s.name}.`, text: tail(raw, lines) };
       const sum = summarize(raw);
@@ -152,18 +213,27 @@ export function register(server: McpServer, ctx: Ctx) {
       return { summary: `${s.project} on ${s.machine}: ${parts.join('. ')}.`, status: s.status, ...sum };
     });
 
-  tool(server, ctx, 'session_send', 'Send a message to a session (typed, then Enter).',
-    { session: z.string(), message: z.string().min(1) },
-    async ({ session, message }) => {
+  tool(server, ctx, 'session_send', 'Send a message to a session (typed, then Enter) and, by default, wait for its reply.',
+    { session: z.string(), message: z.string().min(1), wait: WAIT(45) },
+    async ({ session, message, wait }) => {
       const s = resolve(ctx, session);
+      const sent = Date.now();
       await tmux.sendText(s.m, s.name, message);
       ctx.db.setStatus(s.name, 'working');
-      return { summary: `Sent to ${s.project}.` };
+      return (await sendAndWait(ctx, s, wait, sent)) ?? { summary: `Sent to ${s.project}.` };
+    });
+
+  tool(server, ctx, 'session_wait', 'Wait for a working session to finish its turn (or ask for something), then return its reply.',
+    { session: z.string(), seconds: WAIT(60) },
+    async ({ session, seconds }) => {
+      const s = resolve(ctx, session);
+      const done = s.status !== 'working' || await waitTurn(ctx, s.name, s.m, s.status_since, seconds);
+      return report(ctx, s.name, s.m, done);
     });
 
   tool(server, ctx, 'session_approve', 'Answer a pending permission prompt: yes, always (don\'t ask again), or no.',
-    { session: z.string(), choice: z.enum(['yes', 'no', 'always']) },
-    async ({ session, choice }) => {
+    { session: z.string(), choice: z.enum(['yes', 'no', 'always']), wait: WAIT(30) },
+    async ({ session, choice, wait }) => {
       const s = resolve(ctx, session);
       const pane = await tmux.capture(s.m, s.name, 30);
       if (s.status !== 'waiting_approval' && detectStatus(pane) !== 'waiting_approval') {
@@ -171,9 +241,11 @@ export function register(server: McpServer, ctx: Ctx) {
       }
       // Read the menu on screen; if none is visible, fall back to the tool-permission layout.
       const keys = menuKeys(pane, choice) ?? [{ yes: '1', always: '2', no: 'Escape' }[choice]];
+      const sent = Date.now();
       await tmux.sendKeys(s.m, s.name, ...keys);
       ctx.db.setStatus(s.name, choice === 'no' ? 'waiting_input' : 'working');
-      return { summary: `Answered ${choice} for ${s.project}.` };
+      const turn = choice === 'no' ? null : await sendAndWait(ctx, s, wait, sent);
+      return turn ? { ...turn, summary: `Answered ${choice}. ${turn.summary}` } : { summary: `Answered ${choice} for ${s.project}.` };
     });
 
   tool(server, ctx, 'session_interrupt', 'Press Esc in a session: stops the current work, keeps the session open.',

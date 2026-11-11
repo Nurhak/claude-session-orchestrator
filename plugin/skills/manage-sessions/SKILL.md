@@ -11,9 +11,10 @@ The Session Orchestrator tools reach the user's own machines through their own a
 
 - **"Anything waiting for me?"**: call `events_pending`. For each item, say which project needs what, oldest first.
 - **"How are my projects doing?"**: call `overview` and read its summary, then one line per session if the user wants more.
-- **"What is X doing?"**: call `session_read` with mode `summary`. Use mode `tail` only when the user asks to see output.
-- **"Start a session for X on Y, have it do Z"**: call `session_start` with the project, the machine if named, and the prompt. Confirm the session name it returns.
-- **"Tell X to ..."**: call `session_send` with the user's words.
+- **"What did X say?" / "What is X doing?"**: call `session_read`. Its default mode returns the session's latest reply, the tools it used and the files it changed. Use mode `tail` only when the user asks to see raw output.
+- **"Start a session for X on Y, have it do Z"**: call `session_start` with the project, the machine if named, and the prompt. It waits for the first reply and returns it, so tell the user what the session answered.
+- **"Tell X to ..."**: call `session_send` with the user's words. It waits for the reply (up to `wait` seconds) and returns it in the same call.
+- **A long task**: if a result says the session is still working, call `session_wait` and relay the reply when it comes, instead of reading repeatedly.
 
 ## Permission prompts need the user's explicit decision
 

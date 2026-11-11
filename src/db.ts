@@ -10,6 +10,8 @@ export interface SessionRow {
   remote_control: number;
   status_since: number;
   last_message: string | null;
+  claude_id: string | null;   // Claude Code session id (we pass --session-id, or a hook reports it)
+  transcript: string | null;  // transcript path reported by a hook
 }
 
 export class Db {
@@ -32,9 +34,18 @@ export class Db {
         id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, tool TEXT NOT NULL,
         args TEXT NOT NULL, ok INTEGER NOT NULL, error TEXT);
     `);
+    // Columns added after the first release; ALTER fails harmlessly when they already exist.
+    for (const col of ['claude_id TEXT', 'transcript TEXT']) {
+      try { this.db.exec(`ALTER TABLE sessions ADD COLUMN ${col}`); } catch { /* already there */ }
+    }
   }
 
-  upsertSession(s: Omit<SessionRow, 'status_since' | 'last_message'>) {
+  setTranscript(name: string, claudeId: string | null, transcript: string | null) {
+    this.db.prepare(`UPDATE sessions SET claude_id = COALESCE(?, claude_id), transcript = COALESCE(?, transcript) WHERE name = ?`)
+      .run(claudeId, transcript, name);
+  }
+
+  upsertSession(s: Omit<SessionRow, 'status_since' | 'last_message' | 'claude_id' | 'transcript'>) {
     this.db.prepare(`INSERT INTO sessions (name, machine, project, status, remote_control, status_since)
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET machine = excluded.machine, project = excluded.project,
         status = excluded.status, remote_control = excluded.remote_control, status_since = excluded.status_since`)

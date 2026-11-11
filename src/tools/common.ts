@@ -17,6 +17,7 @@ const HINTS: Record<string, Hint> = {
   session_read: ['Read session output', 'read'],
   session_start: ['Start a Claude Code session', 'write', true],
   session_send: ['Send a message to a session', 'write', true],
+  session_wait: ['Wait for a session to reply', 'read'],
   session_approve: ['Answer a permission prompt', 'destructive', true],
   session_interrupt: ['Interrupt a session', 'write'],
   session_stop: ['Stop a session', 'destructive'],
