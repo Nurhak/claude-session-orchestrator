@@ -22,7 +22,9 @@ export function run(m: Machine, cmd: string, timeoutMs = 5000, input?: string): 
         '-o', `ConnectTimeout=${Math.max(1, Math.floor(timeoutMs / 1000) - 1)}`,
         '-o', 'ServerAliveInterval=2', '-o', 'ServerAliveCountMax=1',
         m.user ? `${m.user}@${m.ssh_host}` : m.ssh_host!,
-        cmd,
+        // Non-interactive SSH shells skip the login profile, so Homebrew (macOS) and the Claude
+        // installer's ~/.local/bin are missing from PATH. tmux sessions inherit this PATH too.
+        `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH; ${cmd}`,
       ]];
   return new Promise((resolve) => {
     const child = execFile(bin, args as string[], { timeout: timeoutMs, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {

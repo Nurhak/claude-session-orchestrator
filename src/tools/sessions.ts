@@ -198,15 +198,17 @@ export function register(server: McpServer, ctx: Ctx) {
       return { summary: `${mode === 'kill' ? 'Killed' : 'Stopped'} ${s.project} on ${s.machine}.` };
     });
 
-  tool(server, ctx, 'overview', 'One-call status of every project: one line per session plus what is waiting on the user. Use for "how are my projects doing?".', {},
+  tool(server, ctx, 'overview', 'One-call status of every project: one line per session plus what is waiting on the user, and every configured project with its machine and number of running sessions. Use for "how are my projects doing?".', {},
     async () => {
       const ss = await refresh(ctx);
       const waiting = ss.filter((s) => s.status === 'waiting_approval' || s.status === 'waiting_input');
       const counts = Object.entries(Object.groupBy(ss, (s) => s.status)).map(([k, v]) => `${v!.length} ${SPOKEN[k as Status]}`);
+      const running = (id: string) => ss.filter((s) => s.project === id && s.status !== 'stopped').length;
       return {
-        summary: ss.length ? `${ss.length} sessions: ${counts.join(', ')}.` : 'No sessions running.',
+        summary: `${ctx.cfg.projects.length} projects configured. ` + (ss.length ? `${ss.length} sessions: ${counts.join(', ')}.` : 'No sessions running.'),
         lines: ss.map(line),
         pending: waiting.map((s) => ({ session: s.name, project: s.project, status: s.status, since: ago(s.status_since), message: s.last_message })),
+        projects: ctx.cfg.projects.map((p) => ({ id: p.id, aliases: p.aliases, machine: p.machine, running_sessions: running(p.id) })),
       };
     });
 }

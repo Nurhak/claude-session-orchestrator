@@ -73,8 +73,12 @@ if (import.meta.main) {
   const ctx = await boot();
   if (!process.env.EVENTS_TOKEN) console.warn('EVENTS_TOKEN is not set: /events will reject every hook.');
   if (!process.env.MCP_TOKEN && !process.env.CF_ACCESS_AUD) console.warn('Neither MCP_TOKEN nor CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUD is set: /mcp will reject every request.');
-  const port = Number(process.env.PORT ?? 8787), host = process.env.HOST ?? '127.0.0.1';
-  app(ctx).listen(port, host, () => console.log(`session-orchestrator on http://${host}:${port}/mcp`));
+  // HOST may list several addresses, e.g. 127.0.0.1,<tailscale-ip>: local clients and other machines' hooks.
+  // One http.Server per address: a single server can only listen on one.
+  const port = Number(process.env.PORT ?? 8787);
+  for (const host of (process.env.HOST ?? '127.0.0.1').split(',').map((h) => h.trim()).filter(Boolean)) {
+    app(ctx).listen(port, host, () => console.log(`session-orchestrator on http://${host}:${port}/mcp`));
+  }
   // Agent mode for the hosted service: dial out and serve tool calls for the signed-in owner.
   if (process.env.ORCH_CLOUD_URL && process.env.ORCH_AGENT_TOKEN) {
     await connectCloud(() => mcpServer(ctx), process.env.ORCH_CLOUD_URL, process.env.ORCH_AGENT_TOKEN);
