@@ -1,7 +1,7 @@
 {
   "name": "session-orchestrator",
   "displayName": "Session Orchestrator",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Manage all your Claude Code sessions across your machines from one place: see what is waiting for you, approve prompts, start, read and stop sessions, by voice or chat.",
   "author": {
     "name": "Nurhak",

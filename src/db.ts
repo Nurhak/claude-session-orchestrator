@@ -40,6 +40,12 @@ export class Db {
     }
   }
 
+  /** Forget a session completely: its row and its events. */
+  deleteSession(name: string) {
+    this.db.prepare(`DELETE FROM events WHERE session = ?`).run(name);
+    this.db.prepare(`DELETE FROM sessions WHERE name = ?`).run(name);
+  }
+
   setTranscript(name: string, claudeId: string | null, transcript: string | null) {
     this.db.prepare(`UPDATE sessions SET claude_id = COALESCE(?, claude_id), transcript = COALESCE(?, transcript) WHERE name = ?`)
       .run(claudeId, transcript, name);

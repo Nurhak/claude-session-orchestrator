@@ -101,7 +101,7 @@ test('lists all tools', async () => {
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, ['agent_run', 'agent_status', 'events_pending', 'llm_list', 'llm_run', 'machine_list', 'machine_status',
     'memory_append', 'memory_delete', 'memory_link', 'memory_read', 'memory_search', 'memory_write', 'overview', 'project_context',
-    'session_approve', 'session_interrupt', 'session_list', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait']);
+    'session_approve', 'session_delete', 'session_interrupt', 'session_list', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait']);
 });
 
 test('unreachable Mac fails fast with a speakable error', async () => {
@@ -356,4 +356,29 @@ test('fast loop: session_send waits and returns the exact reply from the transcr
   const w = await call('session_wait', { session: 'cc-reply-test', seconds: 5 });
   assert.equal(w.done, true);
   await call('session_stop', { session: 'cc-reply-test', mode: 'kill', confirm: true });
+});
+
+test('session_delete stops, forgets, and optionally removes the transcript', async () => {
+  await call('session_start', { project: 'demo', name: 'del one', wait: 0 });
+  await call('session_send', { session: 'cc-del-one', message: 'hello', wait: 10 }); // the fake writes its transcript on input
+  const row = db.session('cc-del-one')!;
+  const transcript = join(tmp, 'home', '.claude', 'projects', 'fake', `${row.claude_id}.jsonl`);
+  assert.ok(existsSync(transcript));
+  assert.match((await call('session_delete', { session: 'cc-del-one' })).summary, /needs confirm=true/);
+  assert.match((await call('session_delete', { session: 'cc-del-one', all_stopped: true, confirm: true })).summary, /either a session or all_stopped/);
+  const r = await call('session_delete', { session: 'cc-del-one', delete_transcript: true, confirm: true });
+  assert.match(r.summary, /Deleted cc-del-one\. Stopped 1 running\. Removed 1 transcript\./);
+  assert.equal(db.session('cc-del-one'), undefined);
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM events WHERE session = 'cc-del-one'").get()!.n, 0);
+  assert.ok(!existsSync(transcript));
+  assert.throws(() => execSync(`tmux has-session -t '=cc-del-one'`, { stdio: 'ignore' }));
+
+  // Bulk: stopped records go, running sessions stay.
+  await call('session_start', { project: 'demo', name: 'keep me', wait: 0 });
+  db.upsertSession({ name: 'cc-old-0001', machine: 'node2', project: 'demo', status: 'stopped', remote_control: 0 });
+  const bulk = await call('session_delete', { all_stopped: true, confirm: true });
+  assert.ok(bulk.deleted.includes('cc-old-0001'));
+  assert.ok(!bulk.deleted.includes('cc-keep-me'));
+  assert.ok(db.session('cc-keep-me'));
+  await call('session_stop', { session: 'cc-keep-me', mode: 'kill', confirm: true });
 });

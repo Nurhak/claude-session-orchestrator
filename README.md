@@ -26,7 +26,7 @@ Ask "how are my projects doing?" while you're away from the keyboard. Then start
                                           └───── hooks POST /events (Bearer EVENTS_TOKEN) ─────┘
 ```
 
-## Tools (23)
+## Tools (24)
 
 | Tool | What it does |
 | --- | --- |
@@ -40,6 +40,7 @@ Ask "how are my projects doing?" while you're away from the keyboard. Then start
 | `session_wait(session, seconds=60)` | Waits for a working session to finish its turn, then returns its reply |
 | `session_approve(session, yes\|no\|always, wait=30)` | Answers the menu on screen (tool permissions, trust dialogs) and waits for what happens next |
 | `session_interrupt(session)` / `session_stop(session, graceful\|kill, confirm?)` | Esc / `/exit`, or kill (kill needs `confirm=true`) |
+| `session_delete(session \| all_stopped, delete_transcript?, confirm)` | Cleanup: stop if running and forget the session; optionally delete its Claude Code transcript |
 | `memory_search` / `memory_read` / `memory_write` / `memory_append` / `memory_delete` | The brain; every write is a git commit, and delete needs `confirm=true` |
 | `memory_link(project, shared_path)` / `project_context(project)` | Link shared knowledge to a project / get everything a session on that project should know |
 | `llm_list()` / `llm_run(task, endpoint=auto, …)` | Local models with auto routing |
@@ -86,7 +87,7 @@ Instead of exposing your own server, sign in to the hosted service with GitHub o
    ORCH_CLOUD_URL=wss://<service>/agent
    ORCH_AGENT_TOKEN=cso_...
    ```
-3. Run `npm start` as usual. The agent connects out (nothing listens publicly) and serves the same 23 tools to your signed-in account only.
+3. Run `npm start` as usual. The agent connects out (nothing listens publicly) and serves the same 24 tools to your signed-in account only.
 
 The hosted part, in `worker/`, is a Cloudflare Worker. It handles OAuth 2.1 with `@cloudflare/workers-oauth-provider`, runs a stateless `/mcp` endpoint, and keeps one Durable Object per user holding that user's agent connection. It stores no tool arguments, sessions, keys or notes. Those stay on your machine. See [worker/README.md](worker/README.md) to deploy your own.
 

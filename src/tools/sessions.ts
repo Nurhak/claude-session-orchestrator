@@ -6,7 +6,7 @@ import { injectContext, logSession } from './memory.ts';
 import type { SessionRow } from '../db.ts';
 import { detectStatus, menuKeys, summarize, tail, type Status } from '../summarize.ts';
 import * as tmux from '../tmux.ts';
-import { lastTurn, readTranscript } from '../transcript.ts';
+import { deleteTranscript, lastTurn, readTranscript } from '../transcript.ts';
 import { q, qpath, runOk } from '../transport/ssh.ts';
 import { ago, tool, type Ctx } from './common.ts';
 
@@ -64,6 +64,19 @@ export function resolve(ctx: Ctx, name: string): SessionRow & { m: ReturnType<ty
   }
   if (!row || row.status === 'stopped') throw new UserError(`No running session called "${name}".`);
   return { ...row, m: findMachine(ctx.cfg, row.machine) };
+}
+
+/** Like resolve(), but also finds stopped sessions (for deletion). */
+function findAny(ctx: Ctx, name: string): SessionRow {
+  const n = name.trim().toLowerCase();
+  const row = ctx.db.session(n) ?? ctx.db.session(`cc-${n}`);
+  if (row) return row;
+  let pid: string | undefined;
+  try { pid = findProject(ctx.cfg, n).id; } catch { /* not a project name */ }
+  const cands = ctx.db.sessions().filter((r) => r.project === pid || r.project === n);
+  if (cands.length > 1) throw new UserError(`"${name}" matches ${cands.length} sessions: ${cands.map((c) => c.name).join(', ')}. Say which one.`);
+  if (!cands.length) throw new UserError(`No session called "${name}".`);
+  return cands[0];
 }
 
 /** Best effort "what happened in this session" entry in the brain's projects/<p>/log.md. */
@@ -268,6 +281,44 @@ export function register(server: McpServer, ctx: Ctx) {
       if (mode === 'kill') await tmux.kill(s.m, s.name);
       else await tmux.sendText(s.m, s.name, '/exit');
       return { summary: `${mode === 'kill' ? 'Killed' : 'Stopped'} ${s.project} on ${s.machine}.` };
+    });
+
+  tool(server, ctx, 'session_delete', 'Delete a session for cleanup: stop it if running, then remove it from the orchestrator. delete_transcript also deletes its Claude Code conversation history (cannot be undone). all_stopped clears every stopped session record. Needs confirm=true.',
+    {
+      session: z.string().optional().describe('Session name, or a project with exactly one session'),
+      all_stopped: z.boolean().optional().describe('Delete every stopped session record instead of one session'),
+      delete_transcript: z.boolean().default(false),
+      confirm: z.boolean().optional(),
+    },
+    async ({ session, all_stopped, delete_transcript, confirm }) => {
+      if (!session === !all_stopped) throw new UserError('Give either a session or all_stopped=true.');
+      const rows = all_stopped
+        ? ctx.db.sessions().filter((r) => r.status === 'stopped')
+        : [findAny(ctx, session!)];
+      if (!rows.length) return { summary: 'No stopped sessions to delete.' };
+      if (confirm !== true) {
+        throw new UserError(`Deleting ${rows.length === 1 ? rows[0].name : `${rows.length} sessions`}${delete_transcript ? ' and their conversation history' : ''} needs confirm=true. Ask the user first.`);
+      }
+      let killed = 0, transcripts = 0;
+      for (const r of rows) {
+        const m = ctx.cfg.machines.find((x) => x.id === r.machine);
+        if (m) {
+          const live = await tmux.capture(m, r.name, 1).then(() => true, () => false);
+          if (live) {
+            await writeLog(ctx, r, m);
+            ctx.db.setStatus(r.name, 'stopped'); // so the SessionEnd hook does not log twice
+            await tmux.kill(m, r.name);
+            killed++;
+          }
+          if (delete_transcript && await deleteTranscript(m, r.transcript, r.claude_id).catch(() => false)) transcripts++;
+        }
+        ctx.db.deleteSession(r.name);
+      }
+      const what = rows.length === 1 ? rows[0].name : `${rows.length} sessions`;
+      return {
+        summary: `Deleted ${what}.${killed ? ` Stopped ${killed} running.` : ''}${delete_transcript ? ` Removed ${transcripts} transcript${transcripts === 1 ? '' : 's'}.` : ''}`,
+        deleted: rows.map((r) => r.name),
+      };
     });
 
   tool(server, ctx, 'overview', 'One-call status of every project: one line per session plus what is waiting on the user, and every configured project with its machine and number of running sessions. Use for "how are my projects doing?".', {},

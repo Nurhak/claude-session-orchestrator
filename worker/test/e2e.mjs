@@ -84,16 +84,16 @@ const text = (r) => JSON.parse(r.content[0].text);
 // 1. Bad agent tokens are refused.
 assert.equal((await fetch(`${BASE}/agent`, { headers: { authorization: 'Bearer cso_nope' } })).status, 401);
 
-// 2. Alice: dashboard token, agent online, MCP sees her 23 annotated tools.
+// 2. Alice: dashboard token, agent online, MCP sees her 24 annotated tools.
 const alice = await dashboardToken('alice', 'e2e laptop');
 const agent = startAgent(alice.token);
 for (let i = 0; i < 40 && !agent.log().includes('cloud: connected'); i++) await wait(250);
-assert.match(agent.log(), /cloud: connected to 127\.0\.0\.1:8788, 23 tools advertised/);
-assert.match(await (await alice.go('/dashboard')).text(), /online since .* 23 tools advertised/);
+assert.match(agent.log(), /cloud: connected to 127\.0\.0\.1:8788, 24 tools advertised/);
+assert.match(await (await alice.go('/dashboard')).text(), /online since .* 24 tools advertised/);
 
 const a = await mcpLogin('alice');
 const tools = (await a.listTools()).tools;
-assert.equal(tools.length, 23);
+assert.equal(tools.length, 24);
 for (const t of tools) assert.ok(t.annotations?.title && typeof t.annotations.readOnlyHint === 'boolean' && typeof t.annotations.destructiveHint === 'boolean', `annotations on ${t.name}`);
 assert.equal(tools.find((t) => t.name === 'session_stop').annotations.destructiveHint, true);
 assert.equal(tools.find((t) => t.name === 'overview').annotations.readOnlyHint, true);

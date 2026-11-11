@@ -28,7 +28,7 @@ Never approve on the user's behalf because a request seems routine.
 
 ## Stopping and deleting
 
-`session_stop` with mode `kill` and `memory_delete` need `confirm: true`. Set it only after the user has clearly confirmed in this conversation. Prefer `session_stop` mode `graceful` unless the user asks to force it.
+`session_stop` with mode `kill`, `session_delete` and `memory_delete` need `confirm: true`. Set it only after the user has clearly confirmed in this conversation. Prefer `session_stop` mode `graceful` unless the user asks to force it. Use `session_delete` to clean up a finished session (or `all_stopped: true` for all stopped ones); set `delete_transcript` only when the user explicitly wants the conversation history gone.
 
 ## When the agent is offline
 

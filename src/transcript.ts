@@ -72,3 +72,13 @@ export async function readTranscript(m: Machine, path: string | null, sessionId:
   const r = await run(m, cmd, 10_000);
   return r.code === 0 && r.stdout.trim() ? r.stdout : null;
 }
+
+/** Delete a session's transcript file (by known path, else by session id). Returns whether a file was removed. */
+export async function deleteTranscript(m: Machine, path: string | null, sessionId: string | null): Promise<boolean> {
+  let target: string;
+  if (isTranscriptPath(path)) target = path.startsWith('~/') ? `"$HOME"${q(path.slice(1))}` : q(path);
+  else if (isSessionId(sessionId)) target = `"$HOME"/.claude/projects/*/${sessionId}.jsonl`;
+  else return false;
+  const r = await run(m, `n=0; for f in ${target}; do [ -f "$f" ] && rm -f "$f" && n=$((n+1)); done; echo $n`, 10_000);
+  return r.code === 0 && Number(r.stdout.trim()) > 0;
+}

@@ -21,6 +21,7 @@ const HINTS: Record<string, Hint> = {
   session_approve: ['Answer a permission prompt', 'destructive', true],
   session_interrupt: ['Interrupt a session', 'write'],
   session_stop: ['Stop a session', 'destructive'],
+  session_delete: ['Delete a session', 'destructive'],
   events_pending: ['What is waiting for me', 'read'],
   overview: ['Overview of all projects', 'read'],
   memory_search: ['Search shared memory', 'read'],
